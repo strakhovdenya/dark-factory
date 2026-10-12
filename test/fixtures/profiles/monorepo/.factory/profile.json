@@ -1,0 +1,37 @@
+{
+  "branchTemplate": "task/ISSUE-{issue}-{slug}",
+  "githubProject": 2,
+  "apps": [
+    {
+      "name": "billing",
+      "path": "packages/billing",
+      "install": [{ "argv": ["npm", "install"], "cwd": "packages/billing" }],
+      "gate": [
+        { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "packages/billing" },
+        { "argv": ["node", "node_modules/eslint/bin/eslint.js", "."], "cwd": "packages/billing" }
+      ]
+    },
+    {
+      "name": "storefront",
+      "path": "packages/storefront",
+      "install": [{ "argv": ["npm", "install"], "cwd": "packages/storefront" }],
+      "gate": [
+        { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "packages/storefront" },
+        { "argv": ["node", "node_modules/vitest/vitest.mjs", "run"], "cwd": "packages/storefront" }
+      ]
+    }
+  ],
+  "docOnlyPathPatterns": ["*.md", "docs/"],
+  "protectedPaths": [".github/", "scripts/", "packages/billing/migrations/"],
+  "labels": { "humanNeeded": "needs-human" },
+  "skillRules": [
+    {
+      "path": "packages/storefront",
+      "extensions": [".ts", ".tsx"],
+      "label": "storefront UI",
+      "skills": ["ui-patterns"]
+    }
+  ],
+  "ruleFiles": ["CLAUDE.md", "packages/billing/CLAUDE.md"],
+  "ralph": { "enabled": true, "techDebtTrackerIssue": 5, "enabledSteps": [] }
+}

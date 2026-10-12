@@ -1,0 +1,75 @@
+{
+  "branchTemplate": "task/ISSUE-{issue}-{slug}",
+  "githubProject": 1,
+  "apps": [
+    {
+      "name": "api",
+      "path": "apps/api",
+      "install": [
+        { "argv": ["npm", "install", "--ignore-scripts"], "cwd": "." },
+        { "argv": ["npm", "install"], "cwd": "apps/api" }
+      ],
+      "gate": [
+        { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "apps/api" },
+        { "argv": ["node", "node_modules/eslint/bin/eslint.js", "--fix-dry-run", "{src,libs,test}/**/*.ts"], "cwd": "apps/api" },
+        { "argv": ["node", "node_modules/jest/bin/jest.js"], "cwd": "apps/api" }
+      ]
+    },
+    {
+      "name": "web",
+      "path": "apps/web",
+      "install": [{ "argv": ["npm", "install"], "cwd": "apps/web" }],
+      "gate": [
+        { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "apps/web" },
+        { "argv": ["node", "node_modules/eslint/bin/eslint.js", "."], "cwd": "apps/web" },
+        { "argv": ["node", "node_modules/vitest/vitest.mjs", "run"], "cwd": "apps/web" }
+      ]
+    }
+  ],
+  "docOnlyPathPatterns": ["*.md", "docs/", "project-management/"],
+  "protectedPaths": [
+    ".claude/",
+    "scripts/",
+    ".github/",
+    ".husky/",
+    ".git/",
+    "apps/api/prisma/prompts/",
+    "apps/api/knowledge-sources/"
+  ],
+  "labels": { "humanNeeded": "ralph-needs-prompt-change" },
+  "verifier": { "goldenDir": ".github/verifier/golden" },
+  "skillRules": [
+    {
+      "path": "apps/api",
+      "extensions": [".ts", ".js", ".mjs", ".cjs"],
+      "label": "backend (apps/api)",
+      "skills": ["nestjs-best-practices"]
+    },
+    {
+      "path": "apps/web",
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".css"],
+      "label": "frontend (apps/web)",
+      "skills": ["vercel-react-best-practices", "ui-ux-pro-max"]
+    },
+    {
+      "path": "scripts",
+      "extensions": [".js", ".mjs", ".cjs"],
+      "label": "scripts",
+      "skills": ["js-conventions"]
+    },
+    {
+      "path": ".claude/ralph",
+      "extensions": [".js", ".mjs", ".cjs"],
+      "label": "Ralph (.claude/ralph)",
+      "skills": ["js-conventions"]
+    }
+  ],
+  "ruleFiles": ["CLAUDE.md", "apps/api/CLAUDE.md", "apps/web/CLAUDE.md"],
+  "docs": { "prd": "project-management/prd", "plans": "project-management/plan" },
+  "agentEnvironment": [
+    "No docker.",
+    "No real Postgres database.",
+    "No running apps/api or apps/web server; starting a dev server in the background is forbidden."
+  ],
+  "ralph": { "enabled": true, "techDebtTrackerIssue": 334, "enabledSteps": [] }
+}
