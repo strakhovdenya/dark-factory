@@ -1,6 +1,6 @@
 {
   "name": "dark-factory",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "AI software factory: Ralph, Acceptance Verifier, Claude Code skills, agents and hooks",
   "files": [
