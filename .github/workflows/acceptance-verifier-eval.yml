@@ -263,7 +263,7 @@ jobs:
         run: |
           set -euo pipefail
           if node factory/verifier/issue-lint.js .verifier/issue.md \
-            --contract trusted/.github/verifier/issue-contract.json \
+            --overlay trusted/.github/verifier/issue-contract.overlay.json \
             --out spec-lint.json; then
             echo "invalid=false" >> "$GITHUB_OUTPUT"
           else

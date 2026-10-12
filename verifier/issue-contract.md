@@ -28,8 +28,32 @@ format of an issue body, not how an issue is written or how a PR is judged.
 | `Dependencies` | yes | — |
 | `Manual verification (owner, not gated)` | no | — |
 
+A section may have alternative names. `Контекст` is also accepted as
+`Context`. A heading must match a name exactly (case-sensitive; trailing
+spaces are ignored). Code finds a section by any of its names through this
+contract; no other list of section names exists.
+
 `Manual verification (owner, not gated)` is optional, holds owner-run checks
 and never contains ID items; it is not judged.
+
+## Project overlay
+
+The contract is the core (`issue-contract.json`) plus the project's overlay,
+`.github/verifier/issue-contract.overlay.json`, read from the default branch.
+A missing file is an empty overlay. The overlay can only add:
+
+```json
+{
+  "sections": [{ "title": "Rollout", "required": true, "idPrefix": null }],
+  "forbiddenPhrases": ["hotfix on prod"]
+}
+```
+
+A section may also carry `alternativeNames` and an `idPrefix` of its own.
+An overlay cannot remove a base section or forbidden phrase, make a required
+section optional, change an ID prefix, or reuse a name of an existing section.
+Such an overlay, an unknown field or a malformed file makes the issue invalid
+(`SPEC_INVALID`) with the reason named; it is never ignored.
 
 ## Item syntax
 

@@ -1,26 +1,31 @@
 'use strict';
 
 const fs = require('node:fs');
-const path = require('node:path');
-
-// The project's trusted contract, relative to the directory the linter runs in (the project root).
-const DEFAULT_CONTRACT = path.join('.github', 'verifier', 'issue-contract.json');
+const {
+  DEFAULT_OVERLAY,
+  OverlayError,
+  buildContract,
+  canonicalNames,
+} = require('./issue-contract');
 
 const usage = () =>
-  'usage: node verifier/issue-lint.js <issue.md> [--contract <path>] [--require-v2] [--out <file.json>]';
+  'usage: node verifier/issue-lint.js <issue.md> [--overlay <path>] [--require-v2] [--out <file.json>] ' +
+  '| node verifier/issue-lint.js <issue.md> --has-role <role> [--overlay <path>]';
 
 const parseArgs = (argv) => {
   let file = null;
-  let contract = DEFAULT_CONTRACT;
+  let overlay = DEFAULT_OVERLAY;
   let requireV2 = false;
   let out = null;
+  let hasRole = null;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--contract' || arg === '--out') {
+    if (arg === '--overlay' || arg === '--out' || arg === '--has-role') {
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) return null;
-      if (arg === '--contract') contract = value;
+      if (arg === '--overlay') overlay = value;
+      else if (arg === '--has-role') hasRole = value;
       else out = value;
       index += 1;
     } else if (arg === '--require-v2') {
@@ -32,10 +37,8 @@ const parseArgs = (argv) => {
     }
   }
 
-  return file ? { file, contract, requireV2, out } : null;
+  return file ? { file, overlay, requireV2, out, hasRole } : null;
 };
-
-const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
 const compileContract = (contract) => {
   const invariantSections = new Set(contract.itemSyntax.invariantSections);
@@ -45,6 +48,7 @@ const compileContract = (contract) => {
   );
   return {
     contract,
+    canonical: canonicalNames(contract),
     invariantSections,
     itemSections,
     checkSections,
@@ -76,7 +80,10 @@ const scan = (markdown, compiled) => {
 
     const headingMatch = line.match(heading);
     if (headingMatch) {
-      currentSection = headingMatch[1];
+      // A heading is matched exactly (case-sensitive) against every name the
+      // contract knows for a section and is filed under the section's main
+      // title. Names the contract does not know keep their own text.
+      currentSection = compiled.canonical.get(headingMatch[1]) ?? headingMatch[1];
       if (!sectionLines.has(currentSection)) sectionLines.set(currentSection, []);
       continue;
     }
@@ -191,6 +198,22 @@ const lint = (markdown, contract, { requireV2 = false } = {}) => {
   return { format: 'v2', ...result };
 };
 
+const hasRole = (markdown, contract, role) => {
+  const compiled = compileContract(contract);
+  const sectionLines = scan(markdown, compiled);
+  return contract.sections.some(
+    (section) => section.role === role && sectionLines.has(section.title),
+  );
+};
+
+// A contract or overlay that cannot be built is reported like a spec problem,
+// so the verdict is FAIL with the overlay as the stated reason (fail closed).
+const invalidContractResult = (error) => ({
+  format: 'v2',
+  problems: [`contract overlay invalid: ${error.message}`],
+  items: [],
+});
+
 const main = (argv = process.argv.slice(2)) => {
   const args = parseArgs(argv);
   if (!args) {
@@ -198,10 +221,29 @@ const main = (argv = process.argv.slice(2)) => {
     return 2;
   }
 
+  let contract;
+  try {
+    contract = buildContract(args.overlay);
+  } catch (error) {
+    if (!(error instanceof OverlayError)) {
+      process.stderr.write(`${error.message}\n`);
+      return 2;
+    }
+    if (args.hasRole) {
+      process.stderr.write(`${invalidContractResult(error).problems[0]}\n`);
+      return 2;
+    }
+    const failed = `${JSON.stringify(invalidContractResult(error), null, 2)}
+`;
+    if (args.out) fs.writeFileSync(args.out, failed);
+    else process.stdout.write(failed);
+    return 1;
+  }
+
   let result;
   try {
     const markdown = fs.readFileSync(args.file, 'utf8');
-    const contract = readJson(args.contract);
+    if (args.hasRole) return hasRole(markdown, contract, args.hasRole) ? 0 : 1;
     result = lint(markdown, contract, { requireV2: args.requireV2 });
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
@@ -216,4 +258,4 @@ const main = (argv = process.argv.slice(2)) => {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { DEFAULT_CONTRACT, parseArgs, lint, main };
+module.exports = { parseArgs, lint, hasRole, main };

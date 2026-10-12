@@ -181,8 +181,14 @@ jobs:
           mkdir -p .verifier
           gh issue view "$ISSUE_NUMBER" --json title,body \
             --jq '"# " + .title + "\n\n" + .body' > .verifier/issue.md
-          if ! grep -qiE '^#{1,6}[[:space:]]+Acceptance Criteria' .verifier/issue.md; then
-            echo "::error::Issue #$ISSUE_NUMBER has no 'Acceptance Criteria' section; acceptance is impossible"
+          # The acceptance section is found by its role in the issue contract
+          # (core + project overlay), under any of its names. Exit 2 means the
+          # overlay is invalid: the lint step below reports that as the spec problem.
+          role_status=0
+          node factory/verifier/issue-lint.js .verifier/issue.md --has-role acceptance \
+            --overlay trusted/.github/verifier/issue-contract.overlay.json || role_status=$?
+          if [ "$role_status" -eq 1 ]; then
+            echo "::error::Issue #$ISSUE_NUMBER has no acceptance criteria section; acceptance is impossible"
             exit 1
           fi
           # Body alone (no title), read the same way spec-approval.yml reads it,
@@ -278,7 +284,7 @@ jobs:
         run: |
           set -euo pipefail
           if node factory/verifier/issue-lint.js .verifier/issue.md \
-            --contract trusted/.github/verifier/issue-contract.json \
+            --overlay trusted/.github/verifier/issue-contract.overlay.json \
             --out spec-lint.json; then
             echo "invalid=false" >> "$GITHUB_OUTPUT"
           else

@@ -193,3 +193,18 @@ test('CLI reports usage and exits 2 on bad args', () => {
   assert.strictEqual(run.status, 2);
   assert.ok(run.stderr.includes('usage:'));
 });
+
+test('finds affects section through contract names', () => {
+  const contract = {
+    sections: [{ title: 'Scope main', alternativeNames: ['Scope alt'], role: 'scope' }],
+  };
+  assert.deepStrictEqual(extractAffectsPatterns('## Scope main\n- `a/x.js`\n', contract), ['a/x.js']);
+  assert.deepStrictEqual(extractAffectsPatterns('## Scope alt\n- `a/y.js`\n', contract), ['a/y.js']);
+  assert.deepStrictEqual(extractAffectsPatterns(issueWithAffects('- `scripts/x.js`')), ['scripts/x.js']);
+});
+
+test('ignores section name not in contract', () => {
+  const markdown = '## Affected files\n- `scripts/x.js`\n';
+  assert.deepStrictEqual(extractAffectsPatterns(markdown), []);
+  assert.deepStrictEqual(computeScope(markdown, 'M\tscripts/x.js\n'),{ out_of_scope: ['scripts/x.js'] });
+});
