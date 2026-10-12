@@ -226,13 +226,11 @@ const main = (argv = process.argv.slice(2)) => {
     contract = buildContract(args.overlay);
   } catch (error) {
     if (!(error instanceof OverlayError)) {
-      process.stderr.write(`${error.message}
-`);
+      process.stderr.write(`${error.message}\n`);
       return 2;
     }
     if (args.hasRole) {
-      process.stderr.write(`${invalidContractResult(error).problems[0]}
-`);
+      process.stderr.write(`${invalidContractResult(error).problems[0]}\n`);
       return 2;
     }
     const failed = `${JSON.stringify(invalidContractResult(error), null, 2)}
@@ -248,8 +246,7 @@ const main = (argv = process.argv.slice(2)) => {
     if (args.hasRole) return hasRole(markdown, contract, args.hasRole) ? 0 : 1;
     result = lint(markdown, contract, { requireV2: args.requireV2 });
   } catch (error) {
-    process.stderr.write(`${error.message}
-`);
+    process.stderr.write(`${error.message}\n`);
     return 2;
   }
 

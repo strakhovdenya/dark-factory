@@ -58,6 +58,7 @@ test('rejects overlay weakening base section', () => {
 
 test('rejects unknown overlay fields and malformed overlays', () => {
   reject({ itemTypes: {} }, /unknown field: itemTypes/);
+  reject({ sections: [{ title: 'X', required: true, role: 'acceptance' }] }, /section X: unknown field: role/);
   reject([], /must be a JSON object/);
   reject({ sections: [{ title: 'X' }] }, /required must be true or false/);
   reject({ forbiddenPhrases: [''] }, /forbiddenPhrases/);

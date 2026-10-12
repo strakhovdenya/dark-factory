@@ -13,6 +13,7 @@ const REMOVAL_FIELDS = new Map([
   ['removeSections', 'section'],
   ['removeForbiddenPhrases', 'forbidden phrase'],
 ]);
+const SECTION_FIELDS = new Set(['title', 'alternativeNames', 'required', 'idPrefix']);
 const ID_PREFIX = /^[A-Z]+$/;
 
 class OverlayError extends Error {}
@@ -58,6 +59,11 @@ const checkAddedSection = (section, taken, prefixes) => {
     throw new OverlayError('a section needs a non-empty title');
   }
   const { title } = section;
+  for (const field of Object.keys(section)) {
+    if (!SECTION_FIELDS.has(field)) {
+      throw new OverlayError(`section ${title}: unknown field: ${field}`);
+    }
+  }
   if (typeof section.required !== 'boolean') {
     throw new OverlayError(`section ${title}: required must be true or false`);
   }
