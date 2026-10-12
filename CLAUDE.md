@@ -70,6 +70,7 @@ Factory work follows the same flow as projects: **GitHub Issue → branch → PR
 
 - Issues follow the issue contract (core sections + project overlay, Acceptance Criteria with `Verify:` lines). Contract file: `.github/verifier/issue-contract.md` in `strakhovdenya/jobflow-cv-pipeline` (until it moves into this repo).
 - Branch name: `task/ISSUE-<n>-<slug>`.
+- Before opening a PR, run `/code-review` on the branch and fix or explicitly dismiss every finding; mention the outcome in the PR description.
 - PR description starts with `Closes #<n>`.
 - The `issues` and `task-lifecycle` skills (base package set) drive this process. Before the first release they do not exist in this repo; they arrive as copies from the pinned release. Follow their procedures rather than restating them here.
 - Until the first release is installed, follow the flow above manually.
