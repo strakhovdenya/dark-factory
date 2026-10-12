@@ -108,9 +108,18 @@ test('loading a missing or invalid trusted config fails instead of using the bas
   const dir = tempDir();
   assert.throws(() => loadRiskZones(path.join(dir, 'absent.json')), /not readable/);
   assert.throws(() => loadRiskZones(writeJson(dir, 'bad.json', '{oops')), /not valid JSON/);
-  const ok = writeJson(dir, 'ok.json', `﻿${JSON.stringify(PROJECT_ZONES)}`);
+  const ok = writeJson(dir, 'ok.json', `\uFEFF${JSON.stringify(PROJECT_ZONES)}`);
   assert.ok(zoneNames(loadRiskZones(ok)).includes('state_machine'));
   fs.rmSync(dir, { recursive: true });
+});
+
+test('renderPrompt copies $ patterns in descriptions literally', () => {
+  const zones = mergeRiskZones({
+    zones: [{ name: 'billing', description: "price in $' and $& refunds" }],
+  });
+  const prompt = renderPrompt(`head\n${PLACEHOLDER}\ntail`, zones);
+  assert.ok(prompt.includes("   - billing: price in $' and $& refunds\n"));
+  assert.strictEqual(prompt.split('tail').length, 2);
 });
 
 test('renderPrompt requires the placeholder', () => {

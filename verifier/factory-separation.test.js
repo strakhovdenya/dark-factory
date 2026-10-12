@@ -177,8 +177,12 @@ test('CLI exits 1 when both sides change without a label', () => {
 });
 
 test('keeps reference cross-change gate', () => {
-  const bothSides =
-    'M\tscripts/issue-lint.js\nM\tscripts/acceptance-verdict/verdict.js\n';
+  const config = {
+    specPatterns: ['spec/**'],
+    verifierPatterns: ['verifier/**'],
+    label: LABEL_NAME,
+  };
+  const bothSides = 'M\tspec/rules.md\nA\tverifier/check.js\n';
   const blocked = [
     [],
     labeledBy('someone-else'),
@@ -186,10 +190,16 @@ test('keeps reference cross-change gate', () => {
     labeledBy('owner-login', 'other-label'),
   ];
   for (const timeline of blocked) {
-    const run = runCli({ files: bothSides, timeline });
+    const run = runCli({ files: bothSides, timeline, config });
     assert.notStrictEqual(run.status, 0, JSON.stringify(timeline));
   }
-  const approved = runCli({ files: bothSides, timeline: labeledBy('owner-login') });
+  const oneSide = runCli({ files: 'M\tspec/rules.md\n', config });
+  assert.strictEqual(oneSide.status, 0, oneSide.stderr);
+  const approved = runCli({
+    files: bothSides,
+    timeline: labeledBy('owner-login'),
+    config,
+  });
   assert.strictEqual(approved.status, 0, approved.stderr);
 });
 

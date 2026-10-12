@@ -98,7 +98,7 @@ const loadRiskZones = (file) => {
   }
   let config;
   try {
-    config = JSON.parse(text.replace(/^﻿/, ''));
+    config = JSON.parse(text.replace(/^\uFEFF/, ''));
   } catch (error) {
     throw new Error(`risk zone config ${file} is not valid JSON: ${error.message}`, { cause: error });
   }
@@ -115,7 +115,8 @@ const renderPrompt = (template, zones) => {
   if (!template.includes(PLACEHOLDER)) {
     throw new Error(`prompt has no ${PLACEHOLDER} placeholder`);
   }
-  return template.replace(PLACEHOLDER, renderZoneList(zones));
+  // A function replacer: $ in a description is copied, never a pattern.
+  return template.replace(PLACEHOLDER, () => renderZoneList(zones));
 };
 
 // Returns a copy of the model output schema whose risk_zones enum is the list.

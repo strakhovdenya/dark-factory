@@ -1216,6 +1216,43 @@ test('fails closed on a missing or invalid verifier configuration', () => {
   );
 });
 
+test('result lists computed items only when their check runs', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verdict-project-'));
+  fs.mkdirSync(path.join(dir, '.factory'));
+  fs.writeFileSync(
+    path.join(dir, '.factory', 'profile.json'),
+    JSON.stringify({
+      branchTemplate: 'b/{issue}',
+      apps: [{ name: 'main', path: '.' }],
+      verifier: { checks: ['ci-checks'] },
+    }),
+  );
+  const ciSpecItem = {
+    id: 'DOD-2',
+    section: 's',
+    type: 'ci',
+    text: 'ci',
+    verify: 'ci "Missing check"',
+  };
+  const spec = { ...V2_SPEC, items: [...V2_SPEC.items, ciSpecItem] };
+  const computedIds = (config) => {
+    const { result } = runVerdictCli({
+      reportText: runReport(),
+      config: [
+        ...config,
+        '--spec',
+        { name: 'spec-ci.json', content: JSON.stringify(spec) },
+      ],
+    });
+    return result.items
+      .filter(({ source }) => source === 'computed')
+      .map(({ id }) => id);
+  };
+  assert.deepStrictEqual(computedIds([]), ['DOD-2']);
+  assert.deepStrictEqual(computedIds(['--project', dir]), []);
+  fs.rmSync(dir, { recursive: true });
+});
+
 test('profile without verifier checks runs none of them', () => {
   // A failed build is a check finding; with no check enabled only the
   // model's own report is judged.

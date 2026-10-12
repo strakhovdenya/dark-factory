@@ -413,7 +413,13 @@ const goldenDirOf = (projectRoot) => {
       `profile field ${GOLDEN_DIR_FIELD} is not set: the project has no golden case directory`,
     );
   }
-  return path.resolve(projectRoot, goldenDir);
+  const casesDir = path.resolve(projectRoot, goldenDir);
+  if (!fs.statSync(casesDir, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(
+      `profile field ${GOLDEN_DIR_FIELD} names ${casesDir}, which is not a directory`,
+    );
+  }
+  return casesDir;
 };
 
 const main = (argv = process.argv.slice(2)) => {

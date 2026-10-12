@@ -454,6 +454,18 @@ test('fails when profile has no golden directory', () => {
   fs.rmSync(dir, { recursive: true });
 });
 
+test('fails when the profile names a missing golden directory', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-eval-'));
+  writeProfile(dir, { goldenDir: 'goldn' });
+  assert.throws(() => goldenDirOf(dir), /verifier\.goldenDir names .* not a directory/);
+  const run = spawnSync(process.execPath, [SCRIPT, '--project', dir, dir], {
+    encoding: 'utf8',
+  });
+  assert.strictEqual(run.status, 2);
+  assert.ok(run.stderr.includes('verifier.goldenDir'), run.stderr);
+  fs.rmSync(dir, { recursive: true });
+});
+
 test('fails when the profile is invalid', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-eval-'));
   fs.mkdirSync(path.join(dir, '.factory'));

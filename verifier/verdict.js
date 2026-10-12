@@ -40,7 +40,8 @@ const {
   reconcile,
 } = require('./verdict/second-run');
 const { buildResult } = require('./verdict/result');
-const { loadProfile } = require('../profile/load');
+const { coreRegistry } = require('./checks');
+const computedItemsCheck = require('./checks/computed-items');
 const { baseRiskZones, loadRiskZones, zoneNames } = require('./risk-zones');
 
 // The verifier's configuration, read by parseConfigArgs: --project names the
@@ -224,14 +225,19 @@ const runCheckRefs = ({
   return 0;
 };
 
+// --project and --risk-zones must name the trusted copy from the default
+// branch, never the PR checkout: the profile decides which checks run.
 // Fail closed: without --project every registered check runs; with it the
 // profile picks them, and an unreadable or invalid profile fails the verdict.
 // Without --risk-zones the report may use only the base zones; a config that
 // was passed but is missing or invalid fails the verdict.
 const readConfig = ({ project, riskZones }) => {
+  /** @type {{ configProblems: string[], checks?: string[], riskZones?: string[] }} */
   const config = { configProblems: [] };
   if (project !== null) {
     try {
+      // Loaded only here: without --project the CLI needs no profile code.
+      const { loadProfile } = require('../profile/load');
       config.checks = loadProfile(project).verifier?.checks ?? [];
     } catch (error) {
       config.configProblems.push(`profile invalid: ${error.message}`);
@@ -298,7 +304,13 @@ const createReportEvaluator = ({
     });
     return { result, problem };
   };
-  return { evaluateReport, computedItems };
+  // result.json lists computed items only when the check that judges them
+  // runs; otherwise they took no part in the verdict.
+  const enabled = options.checks ?? coreRegistry.names();
+  const judgedItems = enabled.includes(computedItemsCheck.name)
+    ? computedItems
+    : [];
+  return { evaluateReport, computedItems: judgedItems };
 };
 
 const runNeedsSecondRun = (options) => {
