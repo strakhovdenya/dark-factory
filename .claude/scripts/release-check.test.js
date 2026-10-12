@@ -26,7 +26,7 @@ test('rejects missing changelog section', () => {
 });
 
 test('rejects malformed tag', () => {
-  for (const tag of ['release-1', 'v1.0', '0.1.0', 'v0.1.0-rc1', '', undefined]) {
+  for (const tag of ['release-1', 'v1.0', '0.1.0', 'v0.1.0-rc1', 'v01.2.3', '', undefined]) {
     const errors = checkRelease(tag, pkg('0.1.0'), CHANGELOG);
     assert.equal(errors.length, 1, String(tag));
     assert.ok(errors[0].includes('vX.Y.Z'), errors[0]);
