@@ -5,17 +5,19 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 
 const {
   readFactoryTag,
   readFactoryTagFile,
   checkTagMatchesSha,
+  verifyPin,
   parseArgs,
 } = require('./factory-version.js');
 
 const SCRIPT = path.join(__dirname, 'factory-version.js');
-const REPO = 'github:factory-owner/dark-factory';
+const REPOSITORY = 'factory-owner/dark-factory';
+const REPO = `github:${REPOSITORY}`;
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
 
@@ -24,29 +26,78 @@ const withFactory = (spec, field = 'dependencies') => ({
   [field]: { 'left-pad': '^1.3.0', 'dark-factory': spec },
 });
 
-const tempPackage = (t, content) => {
+const tempDir = (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-version-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const file = path.join(dir, 'package.json');
+  return dir;
+};
+
+const tempPackage = (t, content) => {
+  const file = path.join(tempDir(t), 'package.json');
   fs.writeFileSync(file, content);
   return file;
 };
 
+const git = (dir, ...args) =>
+  execFileSync(
+    'git',
+    [
+      '-c', 'user.name=test', '-c', 'user.email=test@example.com',
+      '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false',
+      '-C', dir, ...args,
+    ],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  ).trim();
+
+// A local "factory" origin with tag v1.0.0 on its first commit and a second
+// commit after it, and a clone of it standing in for the workflow checkout.
+const factoryRepos = (t) => {
+  const root = tempDir(t);
+  const origin = path.join(root, 'origin');
+  fs.mkdirSync(origin);
+  git(origin, 'init', '--quiet');
+  fs.writeFileSync(path.join(origin, 'a.txt'), 'a\n');
+  git(origin, 'add', 'a.txt');
+  git(origin, 'commit', '--quiet', '-m', 'first');
+  git(origin, 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0');
+  const tagged = git(origin, 'rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(origin, 'b.txt'), 'b\n');
+  git(origin, 'add', 'b.txt');
+  git(origin, 'commit', '--quiet', '-m', 'second');
+  const later = git(origin, 'rev-parse', 'HEAD');
+  const checkout = path.join(root, 'checkout');
+  execFileSync('git', ['clone', '--quiet', '--no-tags', origin, checkout], { stdio: 'ignore' });
+  return { checkout, tagged, later };
+};
+
 const run = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+
+const verifyArgs = (packageFile, factoryDir, wrapperSha) => [
+  'verify',
+  '--package', packageFile,
+  '--repository', REPOSITORY,
+  '--factory-dir', factoryDir,
+  '--wrapper-sha', wrapperSha,
+];
 
 test('reads factory tag from default branch package.json', (t) => {
   assert.equal(readFactoryTag(withFactory(`${REPO}#v1.2.3`)), 'v1.2.3');
-  assert.equal(
-    readFactoryTag(withFactory('git+https://github.com/factory-owner/dark-factory.git#v0.10.0')),
-    'v0.10.0',
-  );
   assert.equal(readFactoryTag(withFactory(`${REPO}#v2.0.1`, 'devDependencies')), 'v2.0.1');
+  const sources = [
+    `${REPO}#v0.10.0`,
+    `${REPOSITORY}#v0.10.0`,
+    `git+https://github.com/${REPOSITORY}.git#v0.10.0`,
+    `https://github.com/${REPOSITORY}#v0.10.0`,
+    `git+ssh://git@github.com/${REPOSITORY}.git#v0.10.0`,
+    `git@github.com:${REPOSITORY}.git#v0.10.0`,
+    'github:Factory-Owner/Dark-Factory#v0.10.0',
+  ];
+  for (const spec of sources) {
+    assert.equal(readFactoryTag(withFactory(spec), { repository: REPOSITORY }), 'v0.10.0', spec);
+  }
 
   const file = tempPackage(t, `﻿${JSON.stringify(withFactory(`${REPO}#v1.2.3`))}`);
-  assert.equal(readFactoryTagFile(file), 'v1.2.3');
-  const cli = run(['tag', '--package', file]);
-  assert.equal(cli.status, 0, cli.stderr);
-  assert.equal(cli.stdout, 'v1.2.3\n');
+  assert.equal(readFactoryTagFile(file, { repository: REPOSITORY }), 'v1.2.3');
 });
 
 test('rejects floating factory reference', (t) => {
@@ -71,13 +122,27 @@ test('rejects floating factory reference', (t) => {
   }
 
   const file = tempPackage(t, JSON.stringify(withFactory(`${REPO}#main`)));
-  const cli = run(['tag', '--package', file]);
+  const cli = run(verifyArgs(file, tempDir(t), SHA_A));
   assert.equal(cli.status, 1);
   assert.equal(cli.stdout, '');
   assert.match(cli.stderr, /floating factory reference .*#main/);
 });
 
-test('rejects tag not matching wrapper sha', () => {
+test('rejects a factory dependency from another repository', () => {
+  for (const spec of [
+    'github:someone/dark-factory-fork#v1.2.3',
+    'github:someone/dark-factory#v1.2.3',
+    'https://example.com/factory-owner/dark-factory.git#v1.2.3',
+  ]) {
+    assert.throws(
+      () => readFactoryTag(withFactory(spec), { repository: REPOSITORY }),
+      /does not install from factory-owner\/dark-factory/,
+      spec,
+    );
+  }
+});
+
+test('rejects tag not matching wrapper sha', (t) => {
   assert.doesNotThrow(() =>
     checkTagMatchesSha({ tag: 'v1.2.3', tagSha: SHA_A, wrapperSha: SHA_A }),
   );
@@ -90,13 +155,27 @@ test('rejects tag not matching wrapper sha', () => {
       error.message.includes(SHA_B),
   );
 
-  const cli = run(['check', '--tag', 'v1.2.3', '--tag-sha', SHA_A, '--wrapper-sha', SHA_B]);
-  assert.equal(cli.status, 1);
-  assert.match(cli.stderr, /v1\.2\.3/);
-  assert.ok(cli.stderr.includes(SHA_A) && cli.stderr.includes(SHA_B), cli.stderr);
-  assert.equal(
-    run(['check', '--tag', 'v1.2.3', '--tag-sha', SHA_A, '--wrapper-sha', SHA_A]).status,
-    0,
+  const { checkout, tagged, later } = factoryRepos(t);
+  const file = tempPackage(t, JSON.stringify(withFactory(`${REPO}#v1.0.0`)));
+  const mismatch = run(verifyArgs(file, checkout, later));
+  assert.equal(mismatch.status, 1);
+  assert.ok(
+    ['v1.0.0', tagged, later].every((part) => mismatch.stderr.includes(part)),
+    mismatch.stderr,
+  );
+
+  const match = run(verifyArgs(file, checkout, tagged));
+  assert.equal(match.status, 0, match.stderr);
+  assert.equal(match.stdout, `factory pin: v1.0.0 (${tagged})\n`);
+});
+
+test('fails when the pinned tag does not exist in the factory', (t) => {
+  const { checkout, tagged } = factoryRepos(t);
+  const file = tempPackage(t, JSON.stringify(withFactory(`${REPO}#v9.9.9`)));
+  assert.throws(
+    () =>
+      verifyPin({ packageFile: file, repository: REPOSITORY, factoryDir: checkout, wrapperSha: tagged }),
+    /factory tag v9\.9\.9 cannot be resolved in factory-owner\/dark-factory/,
   );
 });
 
@@ -122,14 +201,14 @@ test('fails when factory dependency is missing', (t) => {
   assert.throws(() => readFactoryTag([]), /not a JSON object/);
 
   const file = tempPackage(t, JSON.stringify({ name: 'consumer' }));
-  const cli = run(['tag', '--package', file]);
+  const cli = run(verifyArgs(file, tempDir(t), SHA_A));
   assert.equal(cli.status, 1);
   assert.equal(cli.stdout, '');
   assert.match(cli.stderr, /no "dark-factory" dependency/);
 
-  const missing = run(['tag', '--package', path.join(path.dirname(file), 'absent.json')]);
+  const missing = run(verifyArgs(path.join(path.dirname(file), 'absent.json'), tempDir(t), SHA_A));
   assert.equal(missing.status, 1);
-  assert.equal(missing.stdout, '');
+  assert.match(missing.stderr, /not readable JSON/);
 });
 
 test('rejects two different pins of the factory', () => {
@@ -140,15 +219,19 @@ test('rejects two different pins of the factory', () => {
   assert.throws(() => readFactoryTag(packageJson), /pins "dark-factory" twice/);
 });
 
-test('parses only complete commands', () => {
-  assert.deepEqual(parseArgs(['tag', '--package', 'p.json']), {
-    command: 'tag',
+test('parses only complete verify commands', () => {
+  const args = verifyArgs('p.json', 'factory', SHA_A);
+  assert.deepEqual(parseArgs(args), {
     packageFile: 'p.json',
+    repository: REPOSITORY,
+    factoryDir: 'factory',
+    wrapperSha: SHA_A,
   });
   assert.equal(parseArgs([]), null);
-  assert.equal(parseArgs(['tag']), null);
-  assert.equal(parseArgs(['constructor', '--package', 'p.json']), null);
-  assert.equal(parseArgs(['check', '--tag', 'v1.0.0', '--tag-sha', SHA_A]), null);
-  assert.equal(parseArgs(['tag', '--package', '--tag']), null);
+  assert.equal(parseArgs(['tag', ...args.slice(1)]), null);
+  assert.equal(parseArgs(args.slice(0, -2)), null);
+  assert.equal(parseArgs([...args, 'constructor', 'x']), null);
+  assert.equal(parseArgs([...args, '__proto__', 'x']), null);
+  assert.equal(parseArgs(['verify', '--package', '--repository']), null);
   assert.equal(run([]).status, 2);
 });

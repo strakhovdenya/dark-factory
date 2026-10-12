@@ -81,14 +81,13 @@ jobs:
           FACTORY_SHA: ${{ inputs.factory-sha }}
         run: |
           set -euo pipefail
-          if ! TAG=$(node factory/verifier/factory-version.js tag --package trusted/package.json); then
-            echo "::error::The factory release pinned in package.json on the default branch is not a release tag"
+          if ! RESULT=$(node factory/verifier/factory-version.js verify --package trusted/package.json \
+            --repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA" 2>&1); then
+            echo "::error::$RESULT"
+            echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          git -C factory fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
-          TAG_SHA=$(git -C factory rev-parse "refs/tags/$TAG^{commit}")
-          node factory/verifier/factory-version.js check \
-            --tag "$TAG" --tag-sha "$TAG_SHA" --wrapper-sha "$FACTORY_SHA"
+          echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Read trusted config
         id: trusted

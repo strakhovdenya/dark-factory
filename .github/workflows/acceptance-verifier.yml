@@ -91,6 +91,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The PR head can commit files under the names the steps below write.
+      # They are removed so a file the PR supplies (a passing verdict.json, say)
+      # is never read as verifier output when the step that writes it fails or
+      # is skipped.
+      - name: Remove PR files named like verifier outputs
+        run: rm -rf .verifier verdict.json refs-problems.json refs-notes.json ci.json spec-lint.json absence.json spec-approval.json scope.json tampering-scan-result.json provenance.json
+
       # Sparse checkout in cone mode always includes the root files, so
       # package.json (the pinned factory tag) is there too.
       - name: Checkout trusted project files from the default branch
@@ -137,21 +144,7 @@ jobs:
           EVENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
           set -euo pipefail
-          ISSUE_NUMBER=$(node -e '
-            const path = require("node:path");
-            const { loadProfile } = require(path.resolve("factory/profile/load"));
-            const template = loadProfile("trusted").branchTemplate;
-            if (!template.includes("{issue}")) {
-              throw new Error("profile branchTemplate has no {issue} placeholder");
-            }
-            const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const source = template
-              .split(/(\{issue\}|\{slug\})/)
-              .map((part) => (part === "{issue}" ? "([0-9]+)" : part === "{slug}" ? ".+" : escape(part)))
-              .join("");
-            const match = new RegExp(`^${source}$`).exec(process.argv[1]);
-            process.stdout.write(match ? match[1] : "");
-          ' "$BRANCH") || PROFILE_FAILED=true
+          ISSUE_NUMBER=$(node factory/profile/branch.js --project trusted --branch "$BRANCH") || PROFILE_FAILED=true
           if [ "${PROFILE_FAILED:-false}" != "true" ] && [ -z "$ISSUE_NUMBER" ]; then
             echo "::notice::Branch $BRANCH does not match the profile branch template; not a task branch"
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -181,7 +174,7 @@ jobs:
           echo "stale=false" >> "$GITHUB_OUTPUT"
 
           if [ "${PROFILE_FAILED:-false}" = "true" ]; then
-            echo "::error::Project profile .factory/profile.json on the default branch is invalid; verdict is FAIL"
+            echo "::error::The issue number could not be read with the profile branch template (.factory/profile.json on the default branch); verdict is FAIL"
             exit 1
           fi
 
@@ -222,19 +215,13 @@ jobs:
           FACTORY_SHA: ${{ inputs.factory-sha }}
         run: |
           set -euo pipefail
-          if ! TAG=$(node factory/verifier/factory-version.js tag --package trusted/package.json); then
-            echo "::error::The factory release pinned in package.json on the default branch is not a release tag"
+          if ! RESULT=$(node factory/verifier/factory-version.js verify --package trusted/package.json \
+            --repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA" 2>&1); then
+            echo "::error::$RESULT"
+            echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          git -C factory fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
-          TAG_SHA=$(git -C factory rev-parse "refs/tags/$TAG^{commit}")
-          if ! node factory/verifier/factory-version.js check \
-            --tag "$TAG" --tag-sha "$TAG_SHA" --wrapper-sha "$FACTORY_SHA"; then
-            echo "::error::Factory tag $TAG is commit $TAG_SHA, the wrapper calls $FACTORY_SHA"
-            echo "- factory pin: tag $TAG is $TAG_SHA, wrapper SHA $FACTORY_SHA (verdict will FAIL)" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "- factory pin: $TAG ($FACTORY_SHA)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
 
       # Provenance for the PR comment (ADR-042, ISSUE-480 amendment): identifies
       # exactly which issue-body version and which verifier code/model produced
@@ -478,7 +465,7 @@ jobs:
       - name: Restore first run inputs
         run: |
           set -euo pipefail
-          rm -rf .verifier spec-lint.json verdict2.json refs-problems2.json
+          rm -rf .verifier spec-lint.json verdict.json verdict2.json refs-problems2.json
           cp -R first-run/.verifier .verifier
           cp first-run/spec-lint.json spec-lint.json
           rm -rf first-run

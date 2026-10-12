@@ -87,14 +87,13 @@ jobs:
           FACTORY_SHA: ${{ inputs.factory-sha }}
         run: |
           set -euo pipefail
-          if ! TAG=$(node factory/verifier/factory-version.js tag --package trusted/package.json); then
-            echo "::error::The factory release pinned in package.json on the default branch is not a release tag"
+          if ! RESULT=$(node factory/verifier/factory-version.js verify --package trusted/package.json \
+            --repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA" 2>&1); then
+            echo "::error::$RESULT"
+            echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          git -C factory fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
-          TAG_SHA=$(git -C factory rev-parse "refs/tags/$TAG^{commit}")
-          node factory/verifier/factory-version.js check \
-            --tag "$TAG" --tag-sha "$TAG_SHA" --wrapper-sha "$FACTORY_SHA"
+          echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install factory dependencies
         working-directory: factory
@@ -175,6 +174,11 @@ jobs:
           ref: ${{ steps.case.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      # The case head can commit files under the names the steps below
+      # write; they are removed so none is read as verifier output.
+      - name: Remove head files named like verifier outputs
+        run: rm -rf .verifier verdict.json refs-problems.json refs-notes.json ci.json spec-lint.json absence.json scope.json tampering-scan-result.json provenance.json
 
       - name: Checkout trusted project files from the default branch
         uses: actions/checkout@v7
@@ -306,7 +310,7 @@ jobs:
         if: always() && steps.mutation.outcome != 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: case-${{ matrix.case }}
+          name: first-run-${{ matrix.case }}
           include-hidden-files: true
           path: |
             .verifier/
@@ -425,7 +429,7 @@ jobs:
       - name: Download first-run inputs
         uses: actions/download-artifact@v4
         with:
-          name: case-${{ matrix.case }}
+          name: first-run-${{ matrix.case }}
           path: first-run
 
       # Only the inputs are carried over, matching acceptance-verifier.yml's
@@ -470,7 +474,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: case-second-${{ matrix.case }}
+          name: second-run-${{ matrix.case }}
           path: |
             verdict2.json
             refs-problems2.json
@@ -513,10 +517,19 @@ jobs:
         working-directory: factory
         run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
+      # First and second runs have distinct artifact prefixes, so no case
+      # name can make one pattern match the other run's artifact.
       - name: Download first-run results
         uses: actions/download-artifact@v4
         with:
-          pattern: case-*
+          pattern: first-run-*
+          path: results-raw
+        continue-on-error: true
+
+      - name: Download second-run results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: second-run-*
           path: results-raw
         continue-on-error: true
 
@@ -540,8 +553,8 @@ jobs:
           mkdir -p results
           echo "$CASES" | jq -r '.[]' > case-list.txt
           while IFS= read -r CASE; do
-            FIRST="results-raw/case-$CASE"
-            SECOND="results-raw/case-second-$CASE"
+            FIRST="results-raw/first-run-$CASE"
+            SECOND="results-raw/second-run-$CASE"
             if [ ! -d "$FIRST" ]; then
               echo "no first-run artifact for case $CASE" >&2
               continue
