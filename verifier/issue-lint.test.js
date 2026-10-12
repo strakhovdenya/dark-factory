@@ -11,8 +11,16 @@ const { lint, parseArgs } = require('./issue-lint');
 
 const ROOT = path.resolve(__dirname, '..');
 const SCRIPT = path.join(__dirname, 'issue-lint.js');
-const CONTRACT_PATH = path.join(ROOT, '.github', 'verifier', 'issue-contract.json');
+// The contract moves into the core with its own issue; until then the linter is tested on a copy.
+const CONTRACT_DIR = path.join(ROOT, 'test', 'fixtures', 'verifier');
+const CONTRACT_PATH = path.join(CONTRACT_DIR, 'issue-contract.json');
 const CONTRACT = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'));
+
+// A project root holding the contract where the CLI looks for it by default.
+const PROJECT = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-lint-project-'));
+fs.mkdirSync(path.join(PROJECT, '.github', 'verifier'), { recursive: true });
+fs.copyFileSync(CONTRACT_PATH, path.join(PROJECT, '.github', 'verifier', 'issue-contract.json'));
+test.after(() => fs.rmSync(PROJECT, { recursive: true }));
 
 const validIssue = () => `## Контекст
 Описание.
@@ -36,7 +44,7 @@ const validIssue = () => `## Контекст
 - [ ] TR-1 [behavior] Регрессия покрыта тестом. Verify: scripts/x.spec.js "regression"
 
 ## Definition of Done
-- [ ] DOD-1 [ci] Проверка CI успешна. Verify: ci "Test (scripts)"
+- [ ] DOD-1 [ci] Проверка CI успешна. Verify: ci "Test (unit)"
 
 ## Dependencies
 Нет.
@@ -51,7 +59,7 @@ const runCli = (markdown, extra = []) => {
   fs.writeFileSync(issue, markdown);
   const run = spawnSync(process.execPath, [SCRIPT, issue, ...extra], {
     encoding: 'utf8',
-    cwd: ROOT,
+    cwd: PROJECT,
   });
   return { dir, run };
 };
@@ -77,14 +85,14 @@ test('CLI writes JSON to --out and exits 1 when problems exist', () => {
   const issue = path.join(dir, 'issue.md');
   const out = path.join(dir, 'result.json');
   fs.writeFileSync(issue, replace('## Dependencies\nНет.\n', ''));
-  const run = spawnSync(process.execPath, [SCRIPT, issue, '--require-v2', '--out', out], { encoding: 'utf8', cwd: ROOT });
+  const run = spawnSync(process.execPath, [SCRIPT, issue, '--require-v2', '--out', out], { encoding: 'utf8', cwd: PROJECT });
   assert.strictEqual(run.status, 1);
   assert.ok(JSON.parse(fs.readFileSync(out, 'utf8')).problems.some((p) => p.includes('Dependencies')));
   fs.rmSync(dir, { recursive: true });
 });
 
 test('CLI exits 2 on usage error', () => {
-  const run = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8', cwd: ROOT });
+  const run = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8', cwd: PROJECT });
   assert.strictEqual(run.status, 2);
 });
 
@@ -121,7 +129,7 @@ test('rejects config Verify that does not match its grammar', () => {
 });
 
 test('rejects ci Verify that does not match its grammar', () => {
-  assert.ok(problems(replace('Verify: ci "Test (scripts)"', 'Verify: Test (scripts)')).some((p) => p.includes('grammar for type ci')));
+  assert.ok(problems(replace('Verify: ci "Test (unit)"', 'Verify: Test (unit)')).some((p) => p.includes('grammar for type ci')));
 });
 
 test('rejects absence Verify that does not match its grammar', () => {
@@ -171,7 +179,7 @@ test('ignores item-looking lines inside fenced code', () => {
 });
 
 test('the example fenced block in issue-contract.md passes with require-v2', () => {
-  const md = fs.readFileSync(path.join(ROOT, '.github', 'verifier', 'issue-contract.md'), 'utf8');
+  const md = fs.readFileSync(path.join(CONTRACT_DIR, 'issue-contract.md'), 'utf8');
   const match = md.match(/## Пример\s+```markdown\n([\s\S]*?)\n```/);
   assert.ok(match, 'example block not found');
   assert.deepStrictEqual(lint(match[1], CONTRACT, { requireV2: true }).problems, []);

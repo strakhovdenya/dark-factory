@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { patternToRegex } = require('./affects-scope');
 
 const usage = () =>
-  'usage: node scripts/test-tampering-scan.js <diff.patch> --config ' +
+  'usage: node verifier/test-tampering-scan.js <diff.patch> --config ' +
   '<tampering-scan.json> --out <tampering-scan-result.json>';
 
 // Skip-style markers (INV-4's fixtures assemble these by concatenation so

@@ -5,7 +5,7 @@ const { patternToRegex, changedPathsOf } = require('./affects-scope');
 const { authorizeLabel } = require('./label-authority');
 
 const usage = () =>
-  'usage: node scripts/factory-separation.js --files <file> ' +
+  'usage: node verifier/factory-separation.js --files <file> ' +
   '--timeline <file> --owners <file> --config <file> [--json]';
 
 const matchesAny = (patterns, changedPath) =>

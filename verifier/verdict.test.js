@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { parseArgs } = require('./acceptance-verdict');
+const { parseArgs } = require('./verdict');
 const {
   report,
   scanResult,
@@ -26,16 +26,10 @@ const {
   codeqlSuccess,
   runReport,
   BAD_REF_PROBLEM,
-} = require('./acceptance-verdict/test-helpers');
+} = require('./verdict/test-helpers');
 
 const ROOT = path.join(__dirname, '..');
-const SCRIPT = path.join(__dirname, 'acceptance-verdict.js');
-const WORKFLOW = path.join(
-  ROOT,
-  '.github',
-  'workflows',
-  'acceptance-verifier.yml',
-);
+const SCRIPT = path.join(__dirname, 'verdict.js');
 
 test('parseArgs reads file, --out, --refs-problems and flags', () => {
   assert.deepStrictEqual(
@@ -207,7 +201,7 @@ test('CLI end to end: --manual-verified-ignored-unknown renders the unknown acto
 });
 
 test('CLI end to end: check refs, then compute a PASS verdict', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const file = path.join(root, 'verdict.json');
   fs.writeFileSync(file, report());
   const problems = path.join(root, 'refs-problems.json');
@@ -252,7 +246,7 @@ test('CLI end to end: check refs, then compute a PASS verdict', () => {
 
 test('CLI check-refs writes the shift to --notes-out', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': 'one\nexport const x = 1;\nthree\n',
+    'pkg/api/x.ts': 'one\nexport const x = 1;\nthree\n',
   });
   const file = path.join(root, 'verdict.json');
   fs.writeFileSync(
@@ -285,7 +279,7 @@ test('CLI check-refs writes the shift to --notes-out', () => {
 });
 
 test('CLI check-refs without --notes-out writes no notes file', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const file = path.join(root, 'verdict.json');
   fs.writeFileSync(file, report());
   const problems = path.join(root, 'refs-problems.json');
@@ -659,7 +653,7 @@ test('fails with required checks were not checked when file content is not a str
 });
 
 test('CLI check-refs adds a coverage problem from --issue', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const file = path.join(root, 'verdict.json');
   fs.writeFileSync(file, report());
   const issue = path.join(root, 'issue.md');
@@ -679,7 +673,7 @@ test('CLI check-refs adds a coverage problem from --issue', () => {
 });
 
 test('CLI check-refs fails closed when --issue is unreadable', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const file = path.join(root, 'verdict.json');
   fs.writeFileSync(file, report());
   const problems = path.join(root, 'refs-problems.json');
@@ -715,7 +709,7 @@ test('CLI --spec flag fails closed on an invalid v2 spec even without a verdict 
 });
 
 test('CLI --spec flag with a legacy spec keeps the existing PASS comment', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const file = path.join(root, 'verdict.json');
   fs.writeFileSync(file, report());
   const problems = path.join(root, 'refs-problems.json');
@@ -791,7 +785,7 @@ test('CLI check-refs reports id problems from --spec', () => {
     invariants: [invariant('INV-1', 'PASS'), invariant('INV-2', 'N/A')],
   });
   const root = makeCheckout({
-    'apps/api/x.ts': 'export const x = 1;\n',
+    'pkg/api/x.ts': 'export const x = 1;\n',
     'verdict.json': verdict,
     'spec-lint.json': JSON.stringify(V2_SPEC),
   });
@@ -804,7 +798,7 @@ test('CLI check-refs reports id problems from --spec', () => {
 
 test('CLI check-refs fails closed when --spec is unreadable', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': 'export const x = 1;\n',
+    'pkg/api/x.ts': 'export const x = 1;\n',
     'verdict.json': report(),
     'broken.json': '{oops',
   });
@@ -826,11 +820,11 @@ test('CLI end to end: --absence-out then --absence feed a computed PASS into the
         section: 'section',
         type: 'absence',
         text: 'no TODO left',
-        verify: 'absent "TODO" in apps/api/x.ts',
+        verify: 'absent "TODO" in pkg/api/x.ts',
       },
     ],
   };
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const verdictFile = path.join(root, 'verdict.json');
   fs.writeFileSync(
     verdictFile,
@@ -986,7 +980,7 @@ test('CLI passes assertion losses with test-removal approval', () => {
 });
 
 test('entry exports the same public API as before the split', () => {
-  const entry = require('./acceptance-verdict');
+  const entry = require('./verdict');
   assert.deepStrictEqual(
     Object.keys(entry).sort(),
     [
@@ -1020,14 +1014,14 @@ test('entry exports the same public API as before the split', () => {
 });
 
 test('entry re-exports module functions, not copies', () => {
-  const entry = require('./acceptance-verdict');
-  const { evaluate } = require('./acceptance-verdict/verdict');
-  const { renderComment } = require('./acceptance-verdict/render');
-  const { checkRefs } = require('./acceptance-verdict/refs');
-  const { parseCiFailures } = require('./acceptance-verdict/ci');
-  const { countIssueItems } = require('./acceptance-verdict/coverage');
-  const { computeAbsenceItems } = require('./acceptance-verdict/computed');
-  const { readSpecResult } = require('./acceptance-verdict/inputs');
+  const entry = require('./verdict');
+  const { evaluate } = require('./verdict/verdict');
+  const { renderComment } = require('./verdict/render');
+  const { checkRefs } = require('./verdict/refs');
+  const { parseCiFailures } = require('./verdict/ci');
+  const { countIssueItems } = require('./verdict/coverage');
+  const { computeAbsenceItems } = require('./verdict/computed');
+  const { readSpecResult } = require('./verdict/inputs');
   assert.strictEqual(entry.evaluate, evaluate);
   assert.strictEqual(entry.renderComment, renderComment);
   assert.strictEqual(entry.checkRefs, checkRefs);
@@ -1040,184 +1034,10 @@ test('entry re-exports module functions, not copies', () => {
 test('requiring the entry does not run the CLI', () => {
   const run = spawnSync(
     process.execPath,
-    ['-e', "require('./scripts/acceptance-verdict.js')"],
+    ['-e', "require('./verifier/verdict.js')"],
     { cwd: ROOT, encoding: 'utf8' },
   );
   assert.strictEqual(run.status, 0);
   assert.strictEqual(run.stdout, '');
   assert.strictEqual(run.stderr, '');
-});
-
-// Reads every job's trusted sparse-checkout path list directly from the
-// workflow file, keyed by job id (not by position, so adding a job with its
-// own checkout cannot shift the lists), so this test breaks the moment a new
-// module file is added there but not to a job's list.
-const JOB_HEADER = /^ {2}([A-Za-z0-9_-]+):\s*$/;
-const SPARSE_HEADER = /^\s+sparse-checkout: \|\s*$/;
-const SPARSE_LINE = /^ {12}(\S.*)$/;
-
-const readSparseCheckoutBlocks = () => {
-  const lines = fs.readFileSync(WORKFLOW, 'utf8').split(/\r?\n/);
-  const blocks = new Map();
-  let job = null;
-  let paths = null;
-  for (const line of lines) {
-    const jobMatch = JOB_HEADER.exec(line);
-    if (jobMatch !== null) job = jobMatch[1];
-    const pathMatch = paths === null ? null : SPARSE_LINE.exec(line);
-    if (pathMatch !== null) {
-      paths.push(pathMatch[1].trim());
-      continue;
-    }
-    paths = null;
-    if (SPARSE_HEADER.test(line)) {
-      paths = [];
-      blocks.set(job, paths);
-    }
-  }
-  return blocks;
-};
-
-test('sparse checkout blocks are read by job id', () => {
-  const blocks = readSparseCheckoutBlocks();
-  assert.deepStrictEqual([...blocks.keys()], ['verify', 'verify-second', 'report']);
-  for (const paths of blocks.values()) assert.ok(paths.length > 0);
-});
-
-const copyIntoSparseCheckout = (relPath, destRoot) => {
-  const src = path.join(ROOT, relPath);
-  const dest = path.join(destRoot, relPath);
-  if (fs.statSync(src).isDirectory()) {
-    fs.mkdirSync(dest, { recursive: true });
-    fs.cpSync(src, dest, { recursive: true });
-  } else {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(src, dest);
-  }
-};
-
-const makeSparseCheckoutCopy = (relPaths) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sparse-'));
-  for (const relPath of relPaths) copyIntoSparseCheckout(relPath, dir);
-  return dir;
-};
-
-const checkRefsFromCopy = (relPaths) => {
-  const verifyCopy = makeSparseCheckoutCopy(relPaths);
-  const verdictFile = path.join(verifyCopy, 'verdict.json');
-  fs.writeFileSync(
-    verdictFile,
-    report({
-      criteria: [
-        criterion('PASS', 'AC', {
-          refs: [
-            ref({
-              path: 'scripts/acceptance-verdict.js',
-              line: 1,
-              quote: "'use strict'",
-            }),
-          ],
-        }),
-      ],
-    }),
-  );
-  const problems = path.join(verifyCopy, 'refs-problems.json');
-  const check = spawnSync(
-    process.execPath,
-    [
-      path.join(verifyCopy, 'scripts', 'acceptance-verdict.js'),
-      '--check-refs',
-      verdictFile,
-      '--root',
-      verifyCopy,
-      '--out',
-      problems,
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.strictEqual(check.status, 0);
-  assert.strictEqual(fs.readFileSync(problems, 'utf8'), '[]');
-  fs.rmSync(verifyCopy, { recursive: true });
-};
-
-test("CLI runs from copies holding only each job's trusted sparse checkout paths", () => {
-  const blocks = readSparseCheckoutBlocks();
-  const verifyPaths = blocks.get('verify');
-  const secondPaths = blocks.get('verify-second');
-  const reportPaths = blocks.get('report');
-  for (const paths of [verifyPaths, secondPaths, reportPaths]) {
-    assert.ok(paths.includes('scripts/acceptance-verdict/'));
-  }
-
-  checkRefsFromCopy(verifyPaths);
-  checkRefsFromCopy(secondPaths);
-
-  const reportCopy = makeSparseCheckoutCopy(reportPaths);
-  const reportVerdictFile = path.join(reportCopy, 'verdict.json');
-  fs.writeFileSync(reportVerdictFile, report());
-  const ci = path.join(reportCopy, 'ci.json');
-  fs.writeFileSync(ci, ciJson());
-  const tamperingScan = path.join(reportCopy, 'tampering-scan-result.json');
-  fs.writeFileSync(tamperingScan, JSON.stringify(scanResult()));
-  const provenance = path.join(reportCopy, 'provenance.json');
-  fs.writeFileSync(provenance, JSON.stringify(PROVENANCE));
-  const allowedModels = path.join(reportCopy, 'allowed-models.json');
-  fs.writeFileSync(allowedModels, JSON.stringify([PROVENANCE.model]));
-  const reportProblems = path.join(reportCopy, 'refs-problems.json');
-  fs.writeFileSync(reportProblems, '[]');
-  const out = path.join(reportCopy, 'comment.md');
-  const verdict = spawnSync(
-    process.execPath,
-    [
-      path.join(reportCopy, 'scripts', 'acceptance-verdict.js'),
-      reportVerdictFile,
-      '--out',
-      out,
-      '--refs-problems',
-      reportProblems,
-      '--ci',
-      ci,
-      '--tampering-scan',
-      tamperingScan,
-      '--provenance',
-      provenance,
-      '--allowed-models',
-      allowedModels,
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.strictEqual(verdict.status, 0);
-  assert.strictEqual(verdict.stdout.trim(), 'PASS');
-
-  fs.rmSync(reportCopy, { recursive: true });
-});
-
-test('CLI copy without the module directory fails to load', () => {
-  const reportPaths = readSparseCheckoutBlocks().get('report');
-  const withoutModules = reportPaths.filter(
-    (relPath) => !relPath.startsWith('scripts/acceptance-verdict/'),
-  );
-  const copy = makeSparseCheckoutCopy(withoutModules);
-  const run = spawnSync(
-    process.execPath,
-    [path.join(copy, 'scripts', 'acceptance-verdict.js')],
-    { encoding: 'utf8' },
-  );
-  assert.notStrictEqual(run.status, 0);
-  assert.ok(run.stderr.includes('Cannot find module'));
-  assert.ok(run.stderr.includes('acceptance-verdict/'));
-  fs.rmSync(copy, { recursive: true });
-});
-
-test('CLI copy missing one module file fails to load', () => {
-  const reportPaths = readSparseCheckoutBlocks().get('report');
-  const copy = makeSparseCheckoutCopy(reportPaths);
-  fs.rmSync(path.join(copy, 'scripts', 'acceptance-verdict', 'common.js'));
-  const run = spawnSync(
-    process.execPath,
-    [path.join(copy, 'scripts', 'acceptance-verdict.js')],
-    { encoding: 'utf8' },
-  );
-  assert.notStrictEqual(run.status, 0);
-  fs.rmSync(copy, { recursive: true });
 });

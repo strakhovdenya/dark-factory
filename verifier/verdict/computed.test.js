@@ -9,14 +9,14 @@ const { makeCheckout, absenceItem, ciItem, codeqlSuccess, ciJson } =
   require('./test-helpers');
 
 test('absence item passes when the literal is not in the file', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
-  const items = [absenceItem('AC-1', 'TODO', 'apps/api/x.ts')];
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
+  const items = [absenceItem('AC-1', 'TODO', 'pkg/api/x.ts')];
   assert.deepStrictEqual(computeAbsenceItems(items, root), [
     {
       id: 'AC-1',
       text: '',
       status: 'PASS',
-      summary: 'AC-1: literal "TODO" not found in apps/api/x.ts',
+      summary: 'AC-1: literal "TODO" not found in pkg/api/x.ts',
       refs: [],
       computed: true,
     },
@@ -25,12 +25,12 @@ test('absence item passes when the literal is not in the file', () => {
 });
 
 test('absence item fails when the literal is in the file, naming id, path and literal', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const TODO = 1;\n' });
-  const items = [absenceItem('AC-1', 'TODO', 'apps/api/x.ts')];
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const TODO = 1;\n' });
+  const items = [absenceItem('AC-1', 'TODO', 'pkg/api/x.ts')];
   const [entry] = computeAbsenceItems(items, root);
   assert.strictEqual(entry.status, 'FAIL');
   assert.ok(entry.summary.includes('AC-1'));
-  assert.ok(entry.summary.includes('apps/api/x.ts'));
+  assert.ok(entry.summary.includes('pkg/api/x.ts'));
   assert.ok(entry.summary.includes('TODO'));
   fs.rmSync(root, { recursive: true });
 });
@@ -65,18 +65,18 @@ test('absence item fails on a path outside the checkout, under .git, a symlink, 
 });
 
 test('absence item treats a regex-like literal as a plain substring', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'axb\n' });
-  const items = [absenceItem('AC-1', 'a.b*', 'apps/api/x.ts')];
+  const root = makeCheckout({ 'pkg/api/x.ts': 'axb\n' });
+  const items = [absenceItem('AC-1', 'a.b*', 'pkg/api/x.ts')];
   assert.strictEqual(computeAbsenceItems(items, root)[0].status, 'PASS');
   fs.rmSync(root, { recursive: true });
 });
 
 test('ci item passes on a matching successful check-run', () => {
-  const items = [ciItem('DOD-1', 'Test (scripts)')];
+  const items = [ciItem('DOD-1', 'Test (unit)')];
   const raw = ciJson({
     checks: [
       codeqlSuccess,
-      { name: 'Test (scripts)', status: 'completed', conclusion: 'success' },
+      { name: 'Test (unit)', status: 'completed', conclusion: 'success' },
     ],
   });
   const [entry] = computeCiItems(items, raw);
@@ -84,14 +84,14 @@ test('ci item passes on a matching successful check-run', () => {
 });
 
 test('ci item fails when the check-run is missing, in progress, or failed', () => {
-  const items = [ciItem('DOD-1', 'Test (scripts)')];
+  const items = [ciItem('DOD-1', 'Test (unit)')];
   const missing = ciJson({ checks: [codeqlSuccess] });
   assert.strictEqual(computeCiItems(items, missing)[0].status, 'FAIL');
 
   const inProgress = ciJson({
     checks: [
       codeqlSuccess,
-      { name: 'Test (scripts)', status: 'in_progress', conclusion: null },
+      { name: 'Test (unit)', status: 'in_progress', conclusion: null },
     ],
   });
   assert.strictEqual(computeCiItems(items, inProgress)[0].status, 'FAIL');
@@ -99,14 +99,14 @@ test('ci item fails when the check-run is missing, in progress, or failed', () =
   const failed = ciJson({
     checks: [
       codeqlSuccess,
-      { name: 'Test (scripts)', status: 'completed', conclusion: 'failure' },
+      { name: 'Test (unit)', status: 'completed', conclusion: 'failure' },
     ],
   });
   assert.strictEqual(computeCiItems(items, failed)[0].status, 'FAIL');
 });
 
 test('legacy issue ci/absence items are not computed deterministically', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'TODO\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'TODO\n' });
   assert.deepStrictEqual(computeAbsenceItems(null, root), []);
   assert.deepStrictEqual(computeCiItems(null, ciJson()), []);
   fs.rmSync(root, { recursive: true });

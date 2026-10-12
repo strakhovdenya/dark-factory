@@ -3,16 +3,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULT_CONTRACT = path.resolve(
-  __dirname,
-  '..',
-  '.github',
-  'verifier',
-  'issue-contract.json',
-);
+// The project's trusted contract, relative to the directory the linter runs in (the project root).
+const DEFAULT_CONTRACT = path.join('.github', 'verifier', 'issue-contract.json');
 
 const usage = () =>
-  'usage: node scripts/issue-lint.js <issue.md> [--contract <path>] [--require-v2] [--out <file.json>]';
+  'usage: node verifier/issue-lint.js <issue.md> [--contract <path>] [--require-v2] [--out <file.json>]';
 
 const parseArgs = (argv) => {
   let file = null;

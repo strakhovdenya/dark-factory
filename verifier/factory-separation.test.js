@@ -44,7 +44,7 @@ const VERIFIER_PATTERNS = CONFIG_FIXTURE.verifierPatterns.map(patternToRegex);
 const classifyFixture = (changedPaths) =>
   classifyPaths(changedPaths, SPEC_PATTERNS, VERIFIER_PATTERNS);
 
-const OWNERS = ['strakhovdenya'];
+const OWNERS = ['owner-login'];
 
 const labeledBy = (login, labelName = LABEL_NAME) => [
   { event: 'labeled', label: { name: labelName }, actor: { login } },
@@ -179,7 +179,7 @@ test('CLI exits 1 when both sides change without a label', () => {
 test('CLI exits 0 when both sides change with an authorized label', () => {
   const run = runCli({
     files: 'M\tscripts/issue-lint.js\nM\tscripts/acceptance-verdict/verdict.js\n',
-    timeline: labeledBy('strakhovdenya'),
+    timeline: labeledBy('owner-login'),
   });
   assert.strictEqual(run.status, 0);
 });
@@ -221,7 +221,7 @@ test('CLI --json reports classification and label authorization', () => {
     'files.txt',
     'M\tscripts/issue-lint.js\nM\tscripts/acceptance-verdict/verdict.js\n',
   );
-  const timelineFile = writeJson('timeline.json', labeledBy('strakhovdenya'));
+  const timelineFile = writeJson('timeline.json', labeledBy('owner-login'));
   const ownersFile = writeJson('owners.json', OWNERS);
   const configFile = writeJson('config.json', CONFIG_FIXTURE);
   const run = spawnSync(
@@ -244,7 +244,7 @@ test('CLI --json reports classification and label authorization', () => {
   assert.deepStrictEqual(JSON.parse(run.stdout), {
     spec: true,
     verifier: true,
-    label: { authorized: true, actor: 'strakhovdenya' },
+    label: { authorized: true, actor: 'owner-login' },
   });
 });
 

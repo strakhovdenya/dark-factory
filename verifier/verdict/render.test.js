@@ -6,7 +6,7 @@ const { COMMENT_MARKER, renderComment } = require('./render');
 const { evaluate } = require('./verdict');
 const { checkIds } = require('./coverage');
 const { parseCiFailures } = require('./ci');
-const { parseArgs } = require('../acceptance-verdict');
+const { parseArgs } = require('../verdict');
 const {
   ref,
   criterion,
@@ -90,7 +90,7 @@ test('comment carries the marker, verdict and escaped table cells', () => {
   assert.ok(comment.startsWith(COMMENT_MARKER));
   assert.ok(comment.includes('Acceptance verifier: PASS'));
   assert.ok(comment.includes('a \\| b'));
-  assert.ok(comment.includes('apps/api/x.ts:1'));
+  assert.ok(comment.includes('pkg/api/x.ts:1'));
 });
 
 test('comment escapes backslashes before pipes in table cells', () => {
@@ -290,7 +290,7 @@ test('does not fail on assertion losses with test-removal approval', () => {
   assert.strictEqual(result.passed, true);
   const comment = renderComment(result, { problem: null });
   assert.ok(comment.includes('Approved assertion losses'));
-  assert.ok(comment.includes('apps/api/x.spec.ts: 3'));
+  assert.ok(comment.includes('pkg/api/x.spec.ts: 3'));
 });
 
 test('renders ignored test-removal label and still fails', () => {
@@ -356,13 +356,13 @@ test('does not render a Provenance block when provenance is missing', () => {
 test('comment shows the cited and found line for a shifted reference', () => {
   const refs = [
     ref({ line: 313, quote: 'export const x' }),
-    ref({ path: 'apps/api/y.ts', line: 10, quote: 'other' }),
+    ref({ path: 'pkg/api/y.ts', line: 10, quote: 'other' }),
   ];
   const raw = report({ criteria: [criterion('PASS', 'AC one', { refs })] });
   const refsNotes = [{ list: 'criteria', entry: 0, ref: 0, cited: 313, found: 312 }];
   const result = evaluateChecked(raw, { refsNotes });
   const comment = renderComment(result, { problem: null });
-  assert.ok(comment.includes('apps/api/x.ts:313→312'));
-  assert.ok(comment.includes('apps/api/y.ts:10'));
-  assert.ok(!comment.includes('apps/api/y.ts:10→'));
+  assert.ok(comment.includes('pkg/api/x.ts:313→312'));
+  assert.ok(comment.includes('pkg/api/y.ts:10'));
+  assert.ok(!comment.includes('pkg/api/y.ts:10→'));
 });

@@ -1,7 +1,7 @@
 'use strict';
 
 const { execFileSync } = require('node:child_process');
-const { COMMENT_MARKER } = require('./acceptance-verdict/render');
+const { COMMENT_MARKER } = require('./verdict/render');
 const { APPROVAL_AUTHOR: BOT_LOGIN } = require('./spec-hash');
 
 const USAGE =

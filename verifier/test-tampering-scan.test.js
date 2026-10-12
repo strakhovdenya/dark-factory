@@ -198,7 +198,7 @@ test('does not flag a suppression added in application code', () => {
     config: ['**/tsconfig.json'],
   };
   const diff = diffPatch(
-    diffFile('apps/api/src/x.service.ts', { added: [`  // ${TS_IGNORE}`] }),
+    diffFile('pkg/api/src/x.service.ts', { added: [`  // ${TS_IGNORE}`] }),
   );
   assert.deepStrictEqual(scanDiff(diff, config), []);
 });
@@ -224,7 +224,7 @@ test('does not flag continue-on-error outside .github/workflows', () => {
 test('flags a decreased coverageThreshold value', () => {
   const config = { config: ['**/package.json'] };
   const diff = diffPatch(
-    diffFile('apps/api/package.json', {
+    diffFile('pkg/api/package.json', {
       removed: ['"branches": 68,'],
       added: ['"branches": 60,'],
     }),
@@ -240,7 +240,7 @@ test('flags a decreased coverageThreshold value', () => {
 test('does not flag an increased coverageThreshold value', () => {
   const config = { config: ['**/package.json'] };
   const diff = diffPatch(
-    diffFile('apps/api/package.json', {
+    diffFile('pkg/api/package.json', {
       removed: ['"branches": 68,'],
       added: ['"branches": 90,'],
     }),
@@ -251,7 +251,7 @@ test('does not flag an increased coverageThreshold value', () => {
 test('flags a decreased coverageThreshold value even when another value in the same block increased', () => {
   const config = { config: ['**/package.json'] };
   const diff = diffPatch(
-    diffFile('apps/api/package.json', {
+    diffFile('pkg/api/package.json', {
       removed: ['"branches": 68,', '"statements": 91,'],
       added: ['"branches": 60,', '"statements": 95,'],
     }),
@@ -268,7 +268,7 @@ test('flags a decreased coverageThreshold value even when another value in the s
 test('an unrelated same-named key increasing in an earlier hunk does not hide a decrease in a later hunk', () => {
   const config = { config: ['**/package.json'] };
   const diff = diffPatch(
-    diffFileWithHunks('apps/api/package.json', [
+    diffFileWithHunks('pkg/api/package.json', [
       {
         removed: ['"branches": 10,'],
         added: ['"branches": 90,'],
@@ -470,7 +470,7 @@ test('returns no findings for a clean diff', () => {
   const diff = diffPatch(
     diffFile('x.spec.ts', { added: ['assert.ok(true);'] }),
     diffFile('.github/workflows/x.yml', { added: ['  run: echo hi'] }),
-    diffFile('apps/api/package.json', { added: ['"name": "x",'] }),
+    diffFile('pkg/api/package.json', { added: ['"name": "x",'] }),
   );
   assert.deepStrictEqual(scanDiff(diff, config), []);
 });

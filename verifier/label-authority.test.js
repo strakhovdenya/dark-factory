@@ -14,7 +14,7 @@ const {
   main,
 } = require('./label-authority.js');
 
-const OWNERS = ['strakhovdenya'];
+const OWNERS = ['owner-login'];
 const LABEL = 'manual-verified';
 
 const labeled = (login, label = LABEL) => ({
@@ -30,8 +30,8 @@ const unlabeled = (login, label = LABEL) => ({
 });
 
 test('authorizes a label whose last labeled event was set by an owner', () => {
-  const result = authorizeLabel([labeled('strakhovdenya')], OWNERS, LABEL);
-  assert.deepEqual(result, { authorized: true, actor: 'strakhovdenya' });
+  const result = authorizeLabel([labeled('owner-login')], OWNERS, LABEL);
+  assert.deepEqual(result, { authorized: true, actor: 'owner-login' });
 });
 
 test('rejects a label set by a non-owner login', () => {
@@ -58,13 +58,13 @@ test('rejects any login with a [bot] suffix, not only github-actions[bot]', () =
 });
 
 test('rejects a label removed after being set by an owner', () => {
-  const events = [labeled('strakhovdenya'), unlabeled('strakhovdenya')];
+  const events = [labeled('owner-login'), unlabeled('owner-login')];
   const result = authorizeLabel(events, OWNERS, LABEL);
   assert.equal(result.authorized, false);
 });
 
 test('rejects a label re-applied by a non-owner after an owner', () => {
-  const events = [labeled('strakhovdenya'), labeled('someone-else')];
+  const events = [labeled('owner-login'), labeled('someone-else')];
   const result = authorizeLabel(events, OWNERS, LABEL);
   assert.equal(result.authorized, false);
 });
@@ -76,7 +76,7 @@ test('rejects an empty timeline', () => {
 
 test('returns a null actor when no labeled event exists for the label', () => {
   const result = authorizeLabel(
-    [unlabeled('strakhovdenya', 'other-label')],
+    [unlabeled('owner-login', 'other-label')],
     OWNERS,
     LABEL,
   );
@@ -95,11 +95,11 @@ test('a labeled event with no actor login is present but has a null actor', () =
 test('ignores labeled and unlabeled events for other label names', () => {
   const events = [
     labeled('someone-else', 'other-label'),
-    labeled('strakhovdenya'),
-    unlabeled('strakhovdenya', 'other-label'),
+    labeled('owner-login'),
+    unlabeled('owner-login', 'other-label'),
   ];
   const result = authorizeLabel(events, OWNERS, LABEL);
-  assert.deepEqual(result, { authorized: true, actor: 'strakhovdenya' });
+  assert.deepEqual(result, { authorized: true, actor: 'owner-login' });
 });
 
 test('isLabelPresent is true when the last event is labeled, by anyone', () => {
@@ -108,21 +108,21 @@ test('isLabelPresent is true when the last event is labeled, by anyone', () => {
 });
 
 test('isLabelPresent is false when the last event is unlabeled', () => {
-  const events = [labeled('strakhovdenya'), unlabeled('strakhovdenya')];
+  const events = [labeled('owner-login'), unlabeled('owner-login')];
   assert.equal(isLabelPresent(events, LABEL), false);
 });
 
 test('isLabelPresent is false when there is no matching event', () => {
   assert.equal(isLabelPresent([], LABEL), false);
   assert.equal(
-    isLabelPresent([labeled('strakhovdenya', 'other-label')], LABEL),
+    isLabelPresent([labeled('owner-login', 'other-label')], LABEL),
     false,
   );
 });
 
 test('isBotLogin only matches a [bot] suffix', () => {
   assert.equal(isBotLogin('github-actions[bot]'), true);
-  assert.equal(isBotLogin('strakhovdenya'), false);
+  assert.equal(isBotLogin('owner-login'), false);
   assert.equal(isBotLogin('not-a-bot-really'), false);
 });
 
@@ -159,7 +159,7 @@ const captureStdout = (run) => {
 test('CLI prints true for an authorized label', () => {
   withTempFiles(
     {
-      'timeline.json': JSON.stringify([labeled('strakhovdenya')]),
+      'timeline.json': JSON.stringify([labeled('owner-login')]),
       'owners.json': JSON.stringify(OWNERS),
     },
     (paths) => {
@@ -222,7 +222,7 @@ test('CLI prints false and exits 0 on an unreadable file', () => {
 test('CLI --json prints authorized and actor', () => {
   withTempFiles(
     {
-      'timeline.json': JSON.stringify([labeled('strakhovdenya')]),
+      'timeline.json': JSON.stringify([labeled('owner-login')]),
       'owners.json': JSON.stringify(OWNERS),
     },
     (paths) => {
@@ -240,7 +240,7 @@ test('CLI --json prints authorized and actor', () => {
       assert.equal(exitCode, 0);
       assert.deepEqual(JSON.parse(output.trim()), {
         authorized: true,
-        actor: 'strakhovdenya',
+        actor: 'owner-login',
         present: true,
       });
     },

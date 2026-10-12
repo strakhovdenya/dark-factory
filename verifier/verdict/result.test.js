@@ -31,7 +31,7 @@ const {
   evaluateChecked,
 } = require('./test-helpers');
 
-const SCRIPT = path.join(__dirname, '..', 'acceptance-verdict.js');
+const SCRIPT = path.join(__dirname, '..', 'verdict.js');
 
 // Fixture names only — not a real CI check or source path, so this file
 // carries no project-specific literal (INV-8).

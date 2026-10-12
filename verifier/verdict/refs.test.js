@@ -16,7 +16,7 @@ const {
 
 test('checkRefs accepts a matching quote, ignoring whitespace', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': 'a\n  export   const x = 1;\n',
+    'pkg/api/x.ts': 'a\n  export   const x = 1;\n',
   });
   const parsed = JSON.parse(
     report({
@@ -32,9 +32,9 @@ test('checkRefs accepts a matching quote, ignoring whitespace', () => {
 });
 
 test('checkRefs reports a missing file, bad line and wrong quote', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const refs = [
-    ref({ path: 'apps/api/absent.ts' }),
+    ref({ path: 'pkg/api/absent.ts' }),
     ref({ line: 99 }),
     ref({ quote: 'something else' }),
   ];
@@ -89,7 +89,7 @@ test('checkRefs rejects a symlink', (t) => {
 });
 
 test('checkRefs prints the rejected quote', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const refs = [ref({ quote: 'export const x = 1;},{"' })];
   const parsed = JSON.parse(
     report({ criteria: [criterion('PASS', 'AC', { refs })] }),
@@ -134,10 +134,10 @@ test('still rejects a quote whose content differs beyond markdown markup', () =>
 
 test('accepts a quote that writes a tab as a literal backslash-t', () => {
   const root = makeCheckout({
-    'files.txt': linesFile(['M\tscripts/a.js', 'A\tapps/x/y.ts']),
+    'files.txt': linesFile(['M\tscripts/a.js', 'A\tpkg/x/y.ts']),
   });
   const refs = [
-    ref({ path: 'files.txt', line: 2, quote: 'A\\tapps/x/y.ts' }),
+    ref({ path: 'files.txt', line: 2, quote: 'A\\tpkg/x/y.ts' }),
   ];
   const parsed = JSON.parse(
     report({ criteria: [criterion('PASS', 'AC', { refs })] }),
@@ -148,10 +148,10 @@ test('accepts a quote that writes a tab as a literal backslash-t', () => {
 
 test('still rejects a quote whose content differs beyond a literal backslash-t', () => {
   const root = makeCheckout({
-    'files.txt': linesFile(['M\tscripts/a.js', 'A\tapps/x/y.ts']),
+    'files.txt': linesFile(['M\tscripts/a.js', 'A\tpkg/x/y.ts']),
   });
   const refs = [
-    ref({ path: 'files.txt', line: 2, quote: 'A\\tapps/other/y.ts' }),
+    ref({ path: 'files.txt', line: 2, quote: 'A\\tpkg/other/y.ts' }),
   ];
   const parsed = JSON.parse(
     report({ criteria: [criterion('PASS', 'AC', { refs })] }),
@@ -236,7 +236,7 @@ test('rejects a quote consisting only of markdown markers, not a match on every 
 
 test('quote on the cited line is accepted without a shift note', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile(['a', 'b', 'export const x = 1;', 'd', 'e']),
+    'pkg/api/x.ts': linesFile(['a', 'b', 'export const x = 1;', 'd', 'e']),
   });
   const parsed = JSON.parse(
     report({
@@ -255,7 +255,7 @@ test('quote on the cited line is accepted without a shift note', () => {
 
 test('quote one line above or below the cited line is accepted with a shift note', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile([
+    'pkg/api/x.ts': linesFile([
       'one',
       'export const a = 1;',
       'three',
@@ -282,7 +282,7 @@ test('quote one line above or below the cited line is accepted with a shift note
 
 test('quote two lines above or below the cited line is accepted with a shift note', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile([
+    'pkg/api/x.ts': linesFile([
       'export const a = 1;',
       'two',
       'three',
@@ -308,7 +308,7 @@ test('quote two lines above or below the cited line is accepted with a shift not
 
 test('quote three lines away from the cited line is rejected', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile([
+    'pkg/api/x.ts': linesFile([
       'export const a = 1;',
       'two',
       'three',
@@ -334,7 +334,7 @@ test('quote three lines away from the cited line is rejected', () => {
 
 test('invented quote absent from the whole window is rejected', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile(['one', 'export const a = 1;', 'three', 'four', 'five']),
+    'pkg/api/x.ts': linesFile(['one', 'export const a = 1;', 'three', 'four', 'five']),
   });
   const refs = [ref({ line: 3, quote: 'assert.strictEqual(noId.failures[0]' })];
   const parsed = JSON.parse(
@@ -349,7 +349,7 @@ test('invented quote absent from the whole window is rejected', () => {
 
 test('equal distance picks the line above', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile([
+    'pkg/api/x.ts': linesFile([
       'export const x = 1;',
       'cited marker line',
       'export const x = 1;',
@@ -369,21 +369,21 @@ test('equal distance picks the line above', () => {
 
 test('nearest matching line wins and the cited line needs no shift', () => {
   const root = makeCheckout({
-    'apps/api/near.ts': linesFile([
+    'pkg/api/near.ts': linesFile([
       'export const near = 1;',
       'two',
       'cited',
       'export const near = 1;',
       'five',
     ]),
-    'apps/api/exact.ts': linesFile([
+    'pkg/api/exact.ts': linesFile([
       'export const near = 1;',
       'export const near = 1;',
     ]),
   });
   const refs = [
-    ref({ path: 'apps/api/near.ts', line: 3, quote: 'export const near' }),
-    ref({ path: 'apps/api/exact.ts', line: 2, quote: 'export const near' }),
+    ref({ path: 'pkg/api/near.ts', line: 3, quote: 'export const near' }),
+    ref({ path: 'pkg/api/exact.ts', line: 2, quote: 'export const near' }),
   ];
   const parsed = JSON.parse(
     report({ criteria: [criterion('PASS', 'AC', { refs })] }),
@@ -398,7 +398,7 @@ test('nearest matching line wins and the cited line needs no shift', () => {
 
 test('window is clipped at the start of the file', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile(['one', 'export const x = 1;']),
+    'pkg/api/x.ts': linesFile(['one', 'export const x = 1;']),
   });
   const refs = [ref({ line: 1, quote: 'export const x' })];
   const parsed = JSON.parse(
@@ -414,7 +414,7 @@ test('window is clipped at the start of the file', () => {
 
 test('line past the end is still rejected with the window', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': 'one\nexport const x = 1;\n',
+    'pkg/api/x.ts': 'one\nexport const x = 1;\n',
   });
   const refs = [ref({ line: 4, quote: 'export const x' })];
   const parsed = JSON.parse(
@@ -429,7 +429,7 @@ test('line past the end is still rejected with the window', () => {
 
 test('shift note for an invariant reference names the invariants list', () => {
   const root = makeCheckout({
-    'apps/api/x.ts': linesFile(['export const x = 1;', 'two', 'three']),
+    'pkg/api/x.ts': linesFile(['export const x = 1;', 'two', 'three']),
   });
   const parsed = JSON.parse(
     report({
@@ -475,7 +475,7 @@ test('behavior PASS without a test reference fails', () => {
 test('behavior PASS with impl and test references does not fail', () => {
   const parsed = behaviorReport([
     ref({ kind: 'impl' }),
-    ref({ kind: 'test', path: 'apps/api/x.spec.ts' }),
+    ref({ kind: 'test', path: 'pkg/api/x.spec.ts' }),
   ]);
   assert.deepStrictEqual(checkBehaviorRefs(parsed, BEHAVIOR_SPEC_ITEMS), []);
 });
@@ -483,7 +483,7 @@ test('behavior PASS with impl and test references does not fail', () => {
 test('behavior PASS accepts a ci reference in place of impl', () => {
   const parsed = behaviorReport([
     ref({ kind: 'ci' }),
-    ref({ kind: 'test', path: 'apps/api/x.spec.ts' }),
+    ref({ kind: 'test', path: 'pkg/api/x.spec.ts' }),
   ]);
   assert.deepStrictEqual(checkBehaviorRefs(parsed, BEHAVIOR_SPEC_ITEMS), []);
 });
@@ -491,7 +491,7 @@ test('behavior PASS accepts a ci reference in place of impl', () => {
 test('behavior PASS accepts a config reference in place of impl', () => {
   const parsed = behaviorReport([
     ref({ kind: 'config' }),
-    ref({ kind: 'test', path: 'apps/api/x.spec.ts' }),
+    ref({ kind: 'test', path: 'pkg/api/x.spec.ts' }),
   ]);
   assert.deepStrictEqual(checkBehaviorRefs(parsed, BEHAVIOR_SPEC_ITEMS), []);
 });
@@ -507,7 +507,7 @@ test('behavior PASS with a config reference but no test reference still fails', 
 test('behavior PASS with a doc reference in place of impl still fails', () => {
   const parsed = behaviorReport([
     ref({ kind: 'doc' }),
-    ref({ kind: 'test', path: 'apps/api/x.spec.ts' }),
+    ref({ kind: 'test', path: 'pkg/api/x.spec.ts' }),
   ]);
   const problems = checkBehaviorRefs(parsed, BEHAVIOR_SPEC_ITEMS);
   assert.deepStrictEqual(problems, [

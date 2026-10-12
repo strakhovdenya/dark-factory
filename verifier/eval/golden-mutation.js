@@ -18,7 +18,7 @@ const OPTION_FLAGS = {
 };
 
 const usage = () =>
-  'usage: node scripts/golden-mutation.js --repo <dir> --base <sha> ' +
+  'usage: node verifier/eval/golden-mutation.js --repo <dir> --base <sha> ' +
   '--head <sha> --patch <file> --out-dir <dir>';
 
 // An operational failure of the case itself (bad patch, conflict, unknown

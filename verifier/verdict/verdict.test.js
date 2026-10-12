@@ -399,7 +399,7 @@ test('fails when references were not checked', () => {
 
 test('fails when a reference problem was reported', () => {
   const result = evaluateChecked(report(), {
-    refsProblems: ['AC one: apps/api/x.ts:1 - quote not found on that line'],
+    refsProblems: ['AC one: pkg/api/x.ts:1 - quote not found on that line'],
   });
   assert.strictEqual(result.passed, false);
   assert.ok(result.failures[0].startsWith('bad reference:'));
@@ -668,7 +668,7 @@ test('v2 invariant with FAIL status fails naming it', () => {
 });
 
 test('v2 invariant PASS without valid references fails', () => {
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const badQuote = JSON.parse(
     v2Report({
       invariants: [
@@ -679,7 +679,7 @@ test('v2 invariant PASS without valid references fails', () => {
   );
   const problems = checkRefs(badQuote, root);
   assert.strictEqual(problems.length, 1);
-  assert.ok(problems[0].startsWith('INV-1: apps/api/x.ts:1'));
+  assert.ok(problems[0].startsWith('INV-1: pkg/api/x.ts:1'));
   const withBadQuote = evaluateChecked(JSON.stringify(badQuote), {
     spec: V2_SPEC,
     refsProblems: problems,
@@ -751,7 +751,7 @@ test('report without id or invariants violates the schema', () => {
 
 test('a reference with a missing or invalid kind is rejected', () => {
   const missingKind = criterion('PASS', 'AC', {
-    refs: [{ path: 'apps/api/x.ts', line: 1, quote: 'export const x' }],
+    refs: [{ path: 'pkg/api/x.ts', line: 1, quote: 'export const x' }],
   });
   assert.strictEqual(
     evaluateChecked(report({ criteria: [missingKind] })).passed,
@@ -776,7 +776,7 @@ test('an extra model entry for a ci/absence id is ignored', () => {
   const idProblems = checkIds(JSON.parse(raw), CI_ABSENCE_SPEC_ITEMS);
   assert.deepStrictEqual(idProblems, []);
 
-  const root = makeCheckout({ 'apps/api/x.ts': 'export const x = 1;\n' });
+  const root = makeCheckout({ 'pkg/api/x.ts': 'export const x = 1;\n' });
   const refsProblems = checkRefs(JSON.parse(raw), root, CI_ABSENCE_SPEC_ITEMS);
   assert.deepStrictEqual(refsProblems, []);
   fs.rmSync(root, { recursive: true });
@@ -832,7 +832,7 @@ test('fails on assertion losses without test-removal approval', () => {
   const result = evaluateChecked(report(), { assertionLosses: [LOSS] });
   assert.strictEqual(result.passed, false);
   const reason = result.failures.find((f) => f.startsWith('test tampering (scan)'));
-  assert.ok(reason.includes('apps/api/x.spec.ts'));
+  assert.ok(reason.includes('pkg/api/x.spec.ts'));
   assert.ok(reason.includes('3'));
 });
 

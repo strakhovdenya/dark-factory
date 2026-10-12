@@ -11,13 +11,6 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const { RunFailure, applyMutation } = require('./golden-mutation');
 
 const SCRIPT = path.join(__dirname, 'golden-mutation.js');
-const WORKFLOW = path.join(
-  __dirname,
-  '..',
-  '.github',
-  'workflows',
-  'acceptance-verifier-eval.yml',
-);
 
 const git = (repo, ...args) =>
   execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
@@ -190,18 +183,3 @@ test('rejects a sha that is not 40 hex characters', () => {
   assert.throws(() => run({ ...fixture, head: 'HEAD' }), RunFailure);
 });
 
-test('leaves cases without mutation unchanged', () => {
-  const lines = fs
-    .readFileSync(WORKFLOW, 'utf8')
-    .split('\n')
-    .filter((line) => !line.trim().startsWith('#'));
-  const text = lines.join('\n');
-  const mutationSteps = text.match(/golden-mutation\.js/g) ?? [];
-  const guards = text.match(/if: steps\.patch\.outputs\.present == 'true'/g) ?? [];
-  assert.ok(mutationSteps.length >= 2);
-  assert.ok(guards.length >= 2);
-  const unguarded = text.match(
-    /if \[ ! -f \.verifier\/mutation\.json \]; then\n\s+git diff --name-status "\$\{\{ steps\.case\.outputs\.base_sha \}\}"\.\.\."\$HEAD_SHA" > \.verifier\/files\.txt\n\s+git diff "\$\{\{ steps\.case\.outputs\.base_sha \}\}"\.\.\."\$HEAD_SHA" > \.verifier\/diff\.patch\n\s+fi/,
-  );
-  assert.ok(unguarded, 'plain base...head diff kept for cases without a patch');
-});

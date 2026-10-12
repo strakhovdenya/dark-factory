@@ -54,8 +54,8 @@ test('exact path is covered', () => {
 });
 
 test('directory prefix path is covered', () => {
-  const markdown = issueWithAffects('- `apps/api/`');
-  const files = 'A\tapps/api/src/x.ts\n';
+  const markdown = issueWithAffects('- `pkg/api/`');
+  const files = 'A\tpkg/api/src/x.ts\n';
   assert.deepStrictEqual(computeScope(markdown, files), { out_of_scope: [] });
 });
 
@@ -68,8 +68,8 @@ test('star does not match across slash', () => {
 });
 
 test('double star matches across slash', () => {
-  const markdown = issueWithAffects('- `apps/**/*.ts`');
-  const files = 'A\tapps/api/src/x.ts\n';
+  const markdown = issueWithAffects('- `pkg/**/*.ts`');
+  const files = 'A\tpkg/api/src/x.ts\n';
   assert.deepStrictEqual(computeScope(markdown, files), { out_of_scope: [] });
 });
 
@@ -94,12 +94,12 @@ test('delete checks removed path', () => {
 });
 
 test('path with parentheses is escaped literally', () => {
-  const markdown = issueWithAffects('- `apps/api/(x).ts`');
-  const files = 'M\tapps/api/(x).ts\n';
+  const markdown = issueWithAffects('- `pkg/api/(x).ts`');
+  const files = 'M\tpkg/api/(x).ts\n';
   assert.deepStrictEqual(computeScope(markdown, files), { out_of_scope: [] });
-  const other = 'M\tapps/api/ax.ts\n';
+  const other = 'M\tpkg/api/ax.ts\n';
   assert.deepStrictEqual(computeScope(markdown, other), {
-    out_of_scope: ['apps/api/ax.ts'],
+    out_of_scope: ['pkg/api/ax.ts'],
   });
 });
 

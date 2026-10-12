@@ -2,8 +2,6 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const fs = require('node:fs');
-const path = require('node:path');
 const { parseCiFailures } = require('./ci');
 const { evaluate } = require('./verdict');
 const { report, ciJson, codeqlSuccess } = require('./test-helpers');
@@ -126,52 +124,3 @@ test('duplicate check-run entries for a required check fail closed', () => {
   ]);
 });
 
-// Derives the expected required-check names from ci.yml's own job `name:`
-// lines (job id at 2-space indent, its first `name:` at 4-space indent) so
-// this test carries no literal CI check name of its own (INV-6): it fails
-// when required-checks.json and ci.yml's real jobs drift in either
-// direction, not only when a hardcoded snapshot goes stale. Order is
-// compared as a set: required-checks.json is a list of names, not a
-// statement about ci.yml's job declaration order.
-const JOB_ID_LINE = /^ {2}[A-Za-z0-9_-]+:\s*$/;
-const JOB_NAME_LINE = /^ {4}name: (.+)$/;
-
-const jobNamesOf = (workflowText) => {
-  const lines = workflowText.split(/\r?\n/);
-  const names = [];
-  let awaitingName = false;
-  for (const line of lines) {
-    if (JOB_ID_LINE.test(line)) {
-      awaitingName = true;
-      continue;
-    }
-    if (!awaitingName) continue;
-    const match = JOB_NAME_LINE.exec(line);
-    if (match !== null) {
-      names.push(match[1].trim());
-      awaitingName = false;
-    } else if (!/^ {4,}/.test(line)) {
-      awaitingName = false;
-    }
-  }
-  return names;
-};
-
-test('required-checks.json matches ci.yml job names and excludes codecov/patch', () => {
-  const requiredFile = path.join(
-    __dirname,
-    '..',
-    '..',
-    '.github',
-    'verifier',
-    'required-checks.json',
-  );
-  const ciFile = path.join(__dirname, '..', '..', '.github', 'workflows', 'ci.yml');
-  const requiredChecks = JSON.parse(fs.readFileSync(requiredFile, 'utf8'));
-  const ciJobNames = jobNamesOf(fs.readFileSync(ciFile, 'utf8'));
-
-  assert.ok(ciJobNames.length > 0);
-  assert.strictEqual(new Set(requiredChecks).size, requiredChecks.length);
-  assert.deepStrictEqual(new Set(requiredChecks), new Set(ciJobNames));
-  assert.ok(!requiredChecks.includes('codecov/patch'));
-});

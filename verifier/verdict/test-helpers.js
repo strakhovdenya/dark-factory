@@ -6,7 +6,7 @@ const path = require('node:path');
 const { evaluate } = require('./verdict');
 
 const ref = (overrides = {}) => ({
-  path: 'apps/api/x.ts',
+  path: 'pkg/api/x.ts',
   line: 1,
   quote: 'export const x',
   kind: 'impl',
@@ -159,8 +159,8 @@ const evaluateRun = (raw, options = {}) =>
   evaluateChecked(raw, { spec: V2_SPEC, ...options });
 
 const LEGACY_SPEC = { format: 'legacy', problems: [] };
-const BAD_REF_PROBLEM = 'AC-1: quote not found on apps/api/x.ts:1';
-const CI_FAILURE = 'required check failed: Test (scripts) (failure)';
+const BAD_REF_PROBLEM = 'AC-1: quote not found on pkg/api/x.ts:1';
+const CI_FAILURE = 'required check failed: Test (unit) (failure)';
 
 const SHA_APPROVED = 'a'.repeat(64);
 const SHA_CURRENT = 'b'.repeat(64);
@@ -172,7 +172,7 @@ const approvalOf = (approved, current = SHA_CURRENT) => ({
   current_hash: current,
 });
 
-const LOSS = { path: 'apps/api/x.spec.ts', lost: 3 };
+const LOSS = { path: 'pkg/api/x.spec.ts', lost: 3 };
 
 // Built by concatenation (never a contiguous literal): this spec file is
 // itself of class "test", so a literal marker here would flag this file.
@@ -180,8 +180,8 @@ const SKIP_FINDING = `x.spec.ts:1: skip-style marker "${'.' + 'only('}" added in
 
 const CI_ABSENCE_SPEC_ITEMS = [
   specItem('AC-1', 'behavior', 'first behavior'),
-  ciItem('DOD-1', 'Test (scripts)', 'checks are green'),
-  absenceItem('DOD-2', 'TODO', 'apps/api/x.ts', 'no TODO left'),
+  ciItem('DOD-1', 'Test (unit)', 'checks are green'),
+  absenceItem('DOD-2', 'TODO', 'pkg/api/x.ts', 'no TODO left'),
 ];
 
 const hasFailureWith = (result, text) =>
@@ -203,7 +203,7 @@ const ISSUE_MD = [
   '- [ ] Acceptance Criteria above are met',
   '',
   '## Test Requirement',
-  'Unit tests in x.spec.js, CI-check `Test (scripts)`.',
+  'Unit tests in x.spec.js, CI-check `Test (unit)`.',
   '',
   '## Manual verification (owner, not gated)',
   '- not counted',

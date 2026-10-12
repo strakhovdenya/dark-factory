@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
-const { isV2Spec, specItemsOf, isSpecInvalid } = require('./acceptance-verdict/common');
+const { isV2Spec, specItemsOf, isSpecInvalid } = require('./verdict/common');
 const {
   readSpecResult,
   readApproval,
@@ -16,30 +16,30 @@ const {
   readRefsNotes,
   readRawFile,
   readAbsenceItems,
-} = require('./acceptance-verdict/inputs');
+} = require('./verdict/inputs');
 const {
   checkRefs,
   checkRefsWithNotes,
   checkBehaviorRefs,
-} = require('./acceptance-verdict/refs');
+} = require('./verdict/refs');
 const {
   countIssueItems,
   checkCoverage,
   checkIds,
   checkIssueCoverage,
-} = require('./acceptance-verdict/coverage');
-const { parseCiFailures } = require('./acceptance-verdict/ci');
-const { computeAbsenceItems, computeCiItems } = require('./acceptance-verdict/computed');
-const { evaluate, SPEC_NOT_CHECKED } = require('./acceptance-verdict/verdict');
-const { COMMENT_MARKER, renderComment } = require('./acceptance-verdict/render');
+} = require('./verdict/coverage');
+const { parseCiFailures } = require('./verdict/ci');
+const { computeAbsenceItems, computeCiItems } = require('./verdict/computed');
+const { evaluate, SPEC_NOT_CHECKED } = require('./verdict/verdict');
+const { COMMENT_MARKER, renderComment } = require('./verdict/render');
 const {
   VERDICT_NEEDS_HUMAN,
   needsSecondRun,
   divergingIds,
   singleRun,
   reconcile,
-} = require('./acceptance-verdict/second-run');
-const { buildResult } = require('./acceptance-verdict/result');
+} = require('./verdict/second-run');
+const { buildResult } = require('./verdict/result');
 
 const parseArgs = (argv) => {
   const options = {
@@ -209,7 +209,6 @@ const runCheckRefs = ({
 // second run are evaluated on identical deterministic inputs.
 const createReportEvaluator = ({
   manualVerified,
-  refsNotes,
   ci,
   spec,
   absence,

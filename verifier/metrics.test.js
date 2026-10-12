@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { COMMENT_MARKER } = require('./acceptance-verdict/render');
+const { COMMENT_MARKER } = require('./verdict/render');
 const {
   parseCommentMetrics,
   parseVerdict,
@@ -10,7 +10,7 @@ const {
   aggregateMetrics,
   shareOf,
   main,
-} = require('./verifier-metrics');
+} = require('./metrics');
 
 const commentWithTables = ({ verdict = 'FAIL', criteria = [], invariants = [] }) => {
   const rowLines = (rows) => rows.map((row) => `| ${row.join(' | ')} |`);

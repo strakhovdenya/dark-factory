@@ -1,0 +1,74 @@
+{
+  "version": 2,
+  "headingLevel": 2,
+  "sections": [
+    { "title": "Контекст", "required": true, "idPrefix": null },
+    { "title": "Affects", "required": true, "idPrefix": null },
+    { "title": "Docs to Read", "required": true, "idPrefix": null },
+    { "title": "Key Invariants", "required": true, "idPrefix": "INV" },
+    { "title": "Acceptance Criteria", "required": true, "idPrefix": "AC" },
+    { "title": "Test Requirement", "required": true, "idPrefix": "TR" },
+    { "title": "Definition of Done", "required": true, "idPrefix": "DOD" },
+    { "title": "Dependencies", "required": true, "idPrefix": null },
+    {
+      "title": "Manual verification (owner, not gated)",
+      "required": false,
+      "idPrefix": null
+    }
+  ],
+  "itemSyntax": {
+    "checkItem": "^- \\[[ xX]\\] (?<id>(?<prefix>[A-Z]+)-(?<number>[1-9][0-9]*)) \\[(?<type>[a-z]+)\\] (?<text>.+?)\\. Verify: (?<verify>.+)$",
+    "invariantItem": "^- (?<id>(?<prefix>INV)-(?<number>[1-9][0-9]*)) (?<text>.+)$",
+    "invariantSections": ["Key Invariants"]
+  },
+  "itemTypes": {
+    "behavior": {
+      "description": "Runtime behavior proven by a named test.",
+      "verify": "Verify: <spec file path> \"<test name>\"",
+      "verifyPattern": "^(?<path>\\S+\\.(?:spec|test)\\.[cm]?[jt]sx?) \"(?<test>[^\"]+)\"$"
+    },
+    "doc": {
+      "description": "Content of a documentation file.",
+      "verify": "Verify: <path>",
+      "verifyPattern": "^(?<path>\\S+)$"
+    },
+    "config": {
+      "description": "Content of a configuration file.",
+      "verify": "Verify: <path>",
+      "verifyPattern": "^(?<path>\\S+)$"
+    },
+    "ci": {
+      "description": "A CI check on the PR head succeeds.",
+      "verify": "Verify: ci \"<CI check name>\"",
+      "verifyPattern": "^ci \"(?<check>[^\"]+)\"$"
+    },
+    "absence": {
+      "description": "A literal must not occur in a file.",
+      "verify": "Verify: absent \"<literal>\" in <path>",
+      "verifyPattern": "^absent \"(?<literal>[^\"]+)\" in (?<path>\\S+)$"
+    }
+  },
+  "forbiddenPhrasesIgnoreCase": true,
+  "forbiddenPhrases": [
+    "actionlint",
+    "локально",
+    "locally",
+    "вручную",
+    "manually",
+    "смержен",
+    "merged into",
+    "комментарием на",
+    "comment on the issue",
+    "проинспектировано",
+    "отревьюено",
+    "сверено"
+  ],
+  "conditionalItem": {
+    "startsWith": ["Если ", "If "],
+    "contains": ["если применимо", "if applicable"]
+  },
+  "parsing": {
+    "fence": "^\\s*(```|~~~)",
+    "topLevelItem": "^ ?(?:[-*+]|\\d+[.)])\\s+\\S"
+  }
+}

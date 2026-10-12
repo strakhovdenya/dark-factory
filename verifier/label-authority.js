@@ -55,7 +55,7 @@ const authorizeLabel = (events, owners, labelName) => {
 };
 
 const usage = () =>
-  'usage: node scripts/label-authority.js --timeline <file> ' +
+  'usage: node verifier/label-authority.js --timeline <file> ' +
   '--owners <file> --label <name> [--json]';
 
 const parseArgs = (argv) => {

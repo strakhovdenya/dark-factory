@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 
 const usage = () =>
-  'usage: node scripts/affects-scope.js <issue.md> <files.txt> --out <scope.json>';
+  'usage: node verifier/affects-scope.js <issue.md> <files.txt> --out <scope.json>';
 
 const HEADING = /^#{1,6}\s+(.+?)\s*$/;
 const FENCE = /^\s*(```|~~~)/;

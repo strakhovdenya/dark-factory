@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { REASON_CODE_SET } = require('./acceptance-verdict/result');
+const { REASON_CODE_SET } = require('../verdict/result');
 
 const VERDICTS = new Set(['PASS', 'FAIL']);
 const VERDICT_NEEDS_HUMAN = 'NEEDS_HUMAN';
@@ -21,7 +21,7 @@ const OUTCOME = Object.freeze({
 });
 
 const usage = () =>
-  'usage: node scripts/verifier-eval.js <cases-dir> <results-dir> [--out <file>]';
+  'usage: node verifier/eval/verifier-eval.js <cases-dir> <results-dir> [--out <file>]';
 
 const isNonEmptyString = (value) => typeof value === 'string' && value !== '';
 
