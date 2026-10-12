@@ -69,6 +69,7 @@ The factory uses its own **pinned release** (git tag `vX.Y.Z`), installed like i
 Factory work follows the same flow as projects: **GitHub Issue → branch → PR**.
 
 - Issues follow the issue contract (core sections + project overlay, Acceptance Criteria with `Verify:` lines). Contract file: `.github/verifier/issue-contract.md` in `strakhovdenya/jobflow-cv-pipeline` (until it moves into this repo).
+- Before creating or editing an issue, check its body with the linter from the jobflow checkout: `node <path-to>/jobflow-cv-pipeline/scripts/issue-lint.js <issue.md> --require-v2` (it must report no `problems`). TEMPORARY: remove this line and the "until it moves" note above when issue #11 (contract moves into this repo) and #9 (linter moves with the verifier core) are done.
 - Branch name: `task/ISSUE-<n>-<slug>`.
 - Before opening a PR, run `/code-review` on the branch and fix or explicitly dismiss every finding; mention the outcome in the PR description.
 - PR description starts with `Closes #<n>`.
