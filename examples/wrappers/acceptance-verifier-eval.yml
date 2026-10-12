@@ -1,0 +1,27 @@
+name: Acceptance Verifier Eval
+
+# Project wrapper of the factory's reusable golden eval: a manual replay of
+# the project's golden cases (profile `verifier.goldenDir`) against the
+# current verifier. Copy it to .github/workflows/acceptance-verifier-eval.yml
+# of the project and run it by hand from the Actions tab.
+#
+# Pinning: the same full commit SHA as in acceptance-verifier.yml, in BOTH
+# places, i.e. the commit of the factory tag that package.json pins; a
+# different commit fails the eval.
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  acceptance-verifier-eval:
+    name: Acceptance Verifier Eval
+    permissions:
+      contents: read
+    uses: strakhovdenya/dark-factory/.github/workflows/acceptance-verifier-eval.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      factory-sha: 0123456789abcdef0123456789abcdef01234567
+      model: ${{ vars.VERIFIER_MODEL }}
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

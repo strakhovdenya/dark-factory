@@ -1,0 +1,48 @@
+name: Acceptance Verifier
+
+# Project wrapper of the factory's reusable Acceptance Verifier. Copy it to
+# .github/workflows/acceptance-verifier.yml of the project. A workflow in
+# another repository cannot subscribe to this project's workflow_run, so this
+# short file stays in the project; everything else runs in the factory.
+#
+# Pinning: replace the SHA below, in BOTH places, with the full commit SHA of
+# the factory release tag that package.json pins as the `dark-factory`
+# dependency (`git rev-parse vX.Y.Z^{commit}` in the factory). The factory
+# checks that the tag on the default branch resolves to this SHA and gives
+# FAIL when they differ, so move both pins in one PR.
+#
+# workflow_run always runs this file from the default branch, so a PR cannot
+# change which verifier checks it.
+#
+# Project settings: variable VERIFIER_MODEL (model), variable
+# VERIFIER_ENFORCE=true (fail the `Acceptance Verifier` status on a non-PASS
+# verdict), secret OPENAI_API_KEY, and the trusted configs in
+# .github/verifier/ on the default branch.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+concurrency:
+  group: acceptance-verifier-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  acceptance-verifier:
+    name: Acceptance Verifier
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+      checks: read
+      statuses: write
+    uses: strakhovdenya/dark-factory/.github/workflows/acceptance-verifier.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      factory-sha: 0123456789abcdef0123456789abcdef01234567
+      model: ${{ vars.VERIFIER_MODEL }}
+      enforce: ${{ vars.VERIFIER_ENFORCE == 'true' }}
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -1,0 +1,129 @@
+name: Factory Separation
+
+# Reusable workflow: cross-side change gate. A project calls it from a wrapper
+# on `pull_request` (examples/wrappers/factory-separation.yml); its job is the
+# project's `Factory separation` CI check. A PR that changes both the spec
+# side and the verifier side needs the `factory-cross-change` label, set by a
+# trusted owner. The side patterns come only from the project's
+# .github/verifier/factory-separation.json and the owners only from
+# .github/verifier/owners.json, both read from the DEFAULT branch, never from
+# the PR head; the classifier comes only from this repository at
+# `factory-sha`, which must be the commit of the factory tag pinned in the
+# project's default-branch package.json. The PR head is data only: its
+# changed file list is computed with git, nothing from it is executed.
+#
+# A project without factory-separation.json on its default branch has not
+# enabled the gate (or this PR introduces it): the check passes with a notice
+# instead of failing, the same bootstrap exemption as before the move.
+
+on:
+  workflow_call:
+    inputs:
+      factory-sha:
+        description: Full commit SHA of this repository the wrapper calls the workflow at; the project's pinned tag must resolve to it.
+        required: true
+        type: string
+
+permissions: {}
+
+env:
+  # This repository; the classifier is checked out from it at factory-sha.
+  FACTORY_REPOSITORY: strakhovdenya/dark-factory
+  NODE_VERSION: 22
+
+jobs:
+  factory-separation:
+    name: Factory separation
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Checkout pull request (data only)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # github.sha of a pull_request event is the PR merge commit, so the
+      # default branch is checked out by name. Sparse checkout in cone mode
+      # always includes the root files, so package.json (the pinned factory
+      # tag) is there too.
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout: |
+            .github/verifier
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The two pins must name one commit; see the `Check factory pin` step of
+      # acceptance-verifier.yml. A mismatch fails the check.
+      - name: Check factory pin
+        env:
+          FACTORY_SHA: ${{ inputs.factory-sha }}
+        run: |
+          set -euo pipefail
+          if ! RESULT=$(node factory/verifier/factory-version.js verify --package trusted/package.json \
+            --repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA" 2>&1); then
+            echo "::error::$RESULT"
+            echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Read trusted config
+        id: trusted
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ ! -f trusted/.github/verifier/factory-separation.json ]; then
+            echo "::notice::.github/verifier/factory-separation.json is not on $DEFAULT_BRANCH — skipping (the gate is not enabled, or this PR introduces it)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Collect changed files and label timeline
+        if: steps.trusted.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git diff --name-status "$BASE_SHA"..."$HEAD_SHA" > "$RUNNER_TEMP/files.txt"
+          if ! TIMELINE=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/timeline" \
+            --jq '.[] | select(.event == "labeled" or .event == "unlabeled") | {event, label, actor}' \
+            | jq -s '.'); then
+            TIMELINE='[]'
+          fi
+          echo "$TIMELINE" > "$RUNNER_TEMP/timeline.json"
+
+      - name: Check factory separation
+        if: steps.trusted.outputs.skip != 'true'
+        run: |
+          node factory/verifier/factory-separation.js \
+            --files "$RUNNER_TEMP/files.txt" --timeline "$RUNNER_TEMP/timeline.json" \
+            --owners trusted/.github/verifier/owners.json \
+            --config trusted/.github/verifier/factory-separation.json

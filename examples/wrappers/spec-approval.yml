@@ -1,0 +1,27 @@
+name: Spec Approval
+
+# Project wrapper of the factory's reusable spec freeze. Copy it to
+# .github/workflows/spec-approval.yml of the project. When an owner from
+# .github/verifier/owners.json (default branch) applies the `spec-approved`
+# label to an issue, the factory posts the approval comment with the hash of
+# the issue body.
+#
+# Pinning: the same full commit SHA as in acceptance-verifier.yml, in BOTH
+# places, i.e. the commit of the factory tag that package.json pins; a
+# different commit posts no approval.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  spec-approval:
+    name: Spec Approval
+    permissions:
+      contents: read
+      issues: write
+    uses: strakhovdenya/dark-factory/.github/workflows/spec-approval.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      factory-sha: 0123456789abcdef0123456789abcdef01234567

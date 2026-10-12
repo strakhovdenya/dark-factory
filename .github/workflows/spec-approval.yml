@@ -1,0 +1,106 @@
+name: Spec Approval
+
+# Reusable workflow: freezes an issue spec (ADR-042, ISSUE-474 amendment). A
+# project calls it from a wrapper on `issues: labeled`
+# (examples/wrappers/spec-approval.yml). When a trusted owner (the project's
+# .github/verifier/owners.json) applies the `spec-approved` label, this posts
+# a github-actions[bot] comment that starts with
+# `<!-- spec-approved sha256=<hash> -->`, where <hash> is the sha256 of the
+# normalized issue body (checkbox ticks, line endings and trailing whitespace
+# do not count). The acceptance verifier compares the current body with the
+# latest such comment. Re-apply the label to approve a changed body. The label
+# name is a core constant, the same in every project.
+#
+# The scripts come only from this repository at `factory-sha`, which must be
+# the commit of the factory tag pinned in the project's default-branch
+# package.json; the owners list comes only from the project's default branch.
+# The body is read through the GitHub API into a file, never from the event
+# payload, and is never interpolated into shell. The decision whether the
+# sender may approve is made by verifier/spec-hash.js, not by this file.
+
+on:
+  workflow_call:
+    inputs:
+      factory-sha:
+        description: Full commit SHA of this repository the wrapper calls the workflow at; the project's pinned tag must resolve to it.
+        required: true
+        type: string
+
+permissions: {}
+
+env:
+  # This repository; the scripts are checked out from it at factory-sha.
+  FACTORY_REPOSITORY: strakhovdenya/dark-factory
+  NODE_VERSION: 22
+
+jobs:
+  approve:
+    name: Approve spec
+    if: github.event_name == 'issues' && github.event.label.name == 'spec-approved'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # Sparse checkout in cone mode always includes the root files, so
+      # package.json (the pinned factory tag) is there too.
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout: |
+            .github/verifier
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The two pins must name one commit; see the `Check factory pin` step of
+      # acceptance-verifier.yml. A mismatch posts no approval.
+      - name: Check factory pin
+        env:
+          FACTORY_SHA: ${{ inputs.factory-sha }}
+        run: |
+          set -euo pipefail
+          if ! RESULT=$(node factory/verifier/factory-version.js verify --package trusted/package.json \
+            --repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA" 2>&1); then
+            echo "::error::$RESULT"
+            echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compute approval comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SENDER: ${{ github.event.sender.login }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/issues/$ISSUE_NUMBER" --jq '.body // ""' > body.md
+          node factory/verifier/spec-hash.js approve --body body.md \
+            --sender "$SENDER" --owners trusted/.github/verifier/owners.json \
+            --out comment.md
+
+      - name: Publish approval comment
+        if: hashFiles('comment.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$REPO/issues/$ISSUE_NUMBER/comments" \
+            -F body=@comment.md > /dev/null
