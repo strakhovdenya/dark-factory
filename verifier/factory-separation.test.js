@@ -176,6 +176,23 @@ test('CLI exits 1 when both sides change without a label', () => {
   assert.strictEqual(run.status, 1);
 });
 
+test('keeps reference cross-change gate', () => {
+  const bothSides =
+    'M\tscripts/issue-lint.js\nM\tscripts/acceptance-verdict/verdict.js\n';
+  const blocked = [
+    [],
+    labeledBy('someone-else'),
+    labeledBy('github-actions[bot]'),
+    labeledBy('owner-login', 'other-label'),
+  ];
+  for (const timeline of blocked) {
+    const run = runCli({ files: bothSides, timeline });
+    assert.notStrictEqual(run.status, 0, JSON.stringify(timeline));
+  }
+  const approved = runCli({ files: bothSides, timeline: labeledBy('owner-login') });
+  assert.strictEqual(approved.status, 0, approved.stderr);
+});
+
 test('CLI exits 0 when both sides change with an authorized label', () => {
   const run = runCli({
     files: 'M\tscripts/issue-lint.js\nM\tscripts/acceptance-verdict/verdict.js\n',
