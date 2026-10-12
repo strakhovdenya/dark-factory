@@ -1,0 +1,579 @@
+name: Acceptance Verifier Eval
+
+# Reusable workflow: manual, offline replay of a project's golden verifier
+# cases against the CURRENT verifier prompt/schema/model pin, never run
+# automatically on a PR. A project calls it from a wrapper on
+# `workflow_dispatch` (examples/wrappers/acceptance-verifier-eval.yml). For
+# each case under the project's golden case directory (profile
+# `verifier.goldenDir`), it replays the same two-Codex-run + reconciliation
+# pipeline acceptance-verifier.yml's `Verify`/`Verify second`/`Report` jobs
+# run for a real PR, but against that case's frozen issue.md/ci.json/head_sha
+# instead of a live PR's inputs, then compares the reconciled verdict against
+# case.json's expected verdict via verifier/eval/verifier-eval.js. Main
+# metric: false PASS (a known regression the current wording no longer
+# catches). Every case always gets a second model run (unlike the real
+# verifier, which only re-runs when the first FAIL is entirely model
+# judgement): the case set is small and infrequently run, so the extra cost
+# buys a stronger check. Run this by hand before releasing a
+# prompt/schema/model-pin change.
+#
+# Trust boundary, as in acceptance-verifier.yml: verifier code comes only from
+# this repository at `factory-sha`, which must be the commit of the factory tag
+# pinned in the project's default-branch package.json (checked in `Discover
+# golden cases`); the profile, the golden cases and the trusted configs come
+# only from the project's default branch; case heads are data only.
+
+on:
+  workflow_call:
+    inputs:
+      factory-sha:
+        description: Full commit SHA of this repository the wrapper calls the workflow at; the project's pinned tag must resolve to it.
+        required: true
+        type: string
+      model:
+        description: Verifier model (the project's VERIFIER_MODEL variable); empty uses the action default.
+        required: false
+        default: ''
+        type: string
+    secrets:
+      OPENAI_API_KEY:
+        description: Key for the verifier model; used only by the jobs that run the model.
+        required: true
+
+permissions: {}
+
+env:
+  # Same pin as acceptance-verifier.yml's own CODEX_VERSION — see the pin
+  # comment on that workflow's "Run verifier" step before bumping either.
+  CODEX_VERSION: 0.156.1
+  # This repository; the verifier code is checked out from it at factory-sha.
+  FACTORY_REPOSITORY: strakhovdenya/dark-factory
+  NODE_VERSION: 22
+
+jobs:
+  discover:
+    name: Discover golden cases
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      cases: ${{ steps.list.outputs.cases }}
+      golden_dir: ${{ steps.list.outputs.golden_dir }}
+    steps:
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The two pins must name one commit; see the `Check factory pin` step of
+      # acceptance-verifier.yml. Every other job needs this one, so nothing
+      # runs from an unverified checkout.
+      - name: Check factory pin
+        env:
+          FACTORY_SHA: ${{ inputs.factory-sha }}
+        run: |
+          set -euo pipefail
+          if ! TAG=$(node factory/verifier/factory-version.js tag --package trusted/package.json); then
+            echo "::error::The factory release pinned in package.json on the default branch is not a release tag"
+            exit 1
+          fi
+          git -C factory fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          TAG_SHA=$(git -C factory rev-parse "refs/tags/$TAG^{commit}")
+          node factory/verifier/factory-version.js check \
+            --tag "$TAG" --tag-sha "$TAG_SHA" --wrapper-sha "$FACTORY_SHA"
+
+      - name: Install factory dependencies
+        working-directory: factory
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      # The golden case directory comes only from the project profile
+      # (verifier.goldenDir); without it the eval fails instead of using a
+      # default. It must stay inside the project.
+      - id: list
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const { goldenDirOf, readCases } = require(path.resolve("factory/verifier/eval/verifier-eval"));
+            const root = path.resolve("trusted");
+            const casesDir = goldenDirOf(root);
+            const goldenDir = path.relative(root, casesDir).split(path.sep).join("/");
+            if (goldenDir === "" || goldenDir.startsWith("..") || path.isAbsolute(goldenDir)) {
+              throw new Error(`verifier.goldenDir must be a directory inside the project, got ${goldenDir}`);
+            }
+            const names = readCases(casesDir).map(({ name }) => name);
+            if (names.some((name) => !/^[A-Za-z0-9._-]+$/.test(name))) {
+              throw new Error("golden case directory names must match [A-Za-z0-9._-]+");
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              `golden_dir=${goldenDir}\ncases=${JSON.stringify(names)}\n`);
+          '
+
+  verify-case:
+    name: Verify case ${{ matrix.case }} (first run)
+    needs: discover
+    if: needs.discover.outputs.cases != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        case: ${{ fromJson(needs.discover.outputs.cases) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CASE: ${{ matrix.case }}
+      GOLDEN_DIR: ${{ needs.discover.outputs.golden_dir }}
+    steps:
+      - name: Checkout golden case files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            ${{ needs.discover.outputs.golden_dir }}
+          persist-credentials: false
+          path: golden-src
+
+      - name: Read case.json
+        id: case
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const c = JSON.parse(fs.readFileSync(
+              path.join('golden-src', process.env.GOLDEN_DIR, process.env.CASE, 'case.json'), 'utf8'));
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              'head_sha=' + c.head_sha + '\n' + 'base_sha=' + c.base_sha + '\n');
+          "
+
+      # The head checkout below deletes the whole workspace (the root is not a
+      # git repository yet, so actions/checkout empties it whatever `clean`
+      # says), and the model reads the workspace, so the case files with their
+      # expected verdict live outside it from here on.
+      - name: Move golden files out of workspace
+        run: mv golden-src "$RUNNER_TEMP/golden-src"
+
+      - name: Checkout case head (data only)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.case.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout: |
+            .factory
+            .github/verifier
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Detect mutation patch
+        id: patch
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/golden-src/$GOLDEN_DIR/$CASE/mutation.patch" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A case with mutation.patch replays a deliberately corrupted version of
+      # a correct PR: the patch is applied to the checked-out head as data
+      # (git apply only; nothing from the tree or the patch is executed), and
+      # the diff and file list are rebuilt from base to the mutated tree. A
+      # patch that does not apply is a run failure, so the case leaves no
+      # artifact and is counted as one by verifier-eval.js.
+      - name: Apply mutation patch (data only)
+        id: mutation
+        if: steps.patch.outputs.present == 'true'
+        env:
+          BASE_SHA: ${{ steps.case.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.case.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p .verifier
+          node factory/verifier/eval/golden-mutation.js --repo . \
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --patch "$RUNNER_TEMP/golden-src/$GOLDEN_DIR/$CASE/mutation.patch" \
+            --out-dir .verifier
+
+      - name: Prepare inputs
+        env:
+          BASE_SHA: ${{ steps.case.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.case.outputs.head_sha }}
+          MODEL: ${{ inputs.model }}
+          VERIFIER_COMMIT: ${{ inputs.factory-sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p .verifier
+          cp "$RUNNER_TEMP/golden-src/$GOLDEN_DIR/$CASE/issue.md" .verifier/issue.md
+          cp "$RUNNER_TEMP/golden-src/$GOLDEN_DIR/$CASE/ci.json" ci.json
+          if [ ! -f .verifier/mutation.json ]; then
+            git diff --name-status "$BASE_SHA"..."$HEAD_SHA" > .verifier/files.txt
+            git diff "$BASE_SHA"..."$HEAD_SHA" > .verifier/diff.patch
+          fi
+          node factory/verifier/test-tampering-scan.js .verifier/diff.patch \
+            --config trusted/.github/verifier/tampering-scan.json \
+            --out tampering-scan-result.json
+          node factory/verifier/affects-scope.js .verifier/issue.md .verifier/files.txt --out scope.json
+          ISSUE_HASH=$(node factory/verifier/spec-hash.js hash .verifier/issue.md)
+          jq -n --arg head_sha "$HEAD_SHA" --arg verifier_commit "$VERIFIER_COMMIT" \
+            --arg issue_body_sha256 "$ISSUE_HASH" --arg model "$MODEL" \
+            --arg codex_version "$CODEX_VERSION" \
+            '{head_sha: $head_sha, issue_body_sha256: $issue_body_sha256, verifier_commit: $verifier_commit, model: $model, codex_version: $codex_version}' \
+            > provenance.json
+
+      - name: Lint issue against contract
+        id: spec
+        run: |
+          set -euo pipefail
+          if node factory/verifier/issue-lint.js .verifier/issue.md \
+            --contract trusted/.github/verifier/issue-contract.json \
+            --out spec-lint.json; then
+            echo "invalid=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "invalid=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The model's prompt and output schema with the project's trusted risk
+      # zones; see `Render prompt and schema` in acceptance-verifier.yml.
+      - name: Render prompt and schema
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/verifier"
+          node factory/verifier/risk-zones.js --config trusted/.github/verifier/risk-zones.json \
+            --prompt-out "$RUNNER_TEMP/verifier/prompt.md" --schema-out "$RUNNER_TEMP/verifier/schema.json"
+
+      # Same pin as acceptance-verifier.yml's own "Run verifier" step; see the
+      # pin comment there (openai/codex-action #150/#169, fix PR #151 not
+      # merged upstream) before changing it.
+      - name: Run verifier (first run)
+        id: codex
+        if: steps.spec.outputs.invalid != 'true'
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ runner.temp }}/verifier/prompt.md
+          output-schema-file: ${{ runner.temp }}/verifier/schema.json
+          output-file: verdict.json
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-version: ${{ env.CODEX_VERSION }}
+          model: ${{ inputs.model }}
+          effort: high
+
+      - name: Check references (first run)
+        if: always() && hashFiles('verdict.json') != ''
+        run: node factory/verifier/verdict.js --check-refs verdict.json --root . --out refs-problems.json --issue .verifier/issue.md --spec spec-lint.json --absence-out absence.json --notes-out refs-notes.json
+
+      # Everything a later job needs to reconcile this case's two runs and
+      # compute its final verdict: the model report and its refs problems,
+      # plus every deterministic input, all under one artifact per case.
+      - name: Upload first-run inputs and result
+        if: always() && steps.mutation.outcome != 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: case-${{ matrix.case }}
+          include-hidden-files: true
+          path: |
+            .verifier/
+            verdict.json
+            refs-problems.json
+            refs-notes.json
+            absence.json
+            spec-lint.json
+            scope.json
+            ci.json
+            tampering-scan-result.json
+            provenance.json
+          if-no-files-found: warn
+
+  # A separate job because drop-sudo runs only once per job (see the pin
+  # comment in verify-case above). Always runs for every case (this eval
+  # tool does not replicate the real verifier's "needs second run" skip —
+  # see the workflow header comment) using the same static case list, so no
+  # dynamic per-case discovery is needed.
+  verify-case-second:
+    name: Verify case ${{ matrix.case }} (second run)
+    needs: [discover, verify-case]
+    if: needs.discover.outputs.cases != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        case: ${{ fromJson(needs.discover.outputs.cases) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CASE: ${{ matrix.case }}
+      GOLDEN_DIR: ${{ needs.discover.outputs.golden_dir }}
+    steps:
+      - name: Checkout golden case files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            ${{ needs.discover.outputs.golden_dir }}
+          persist-credentials: false
+          path: golden-src
+
+      - name: Read case.json
+        id: case
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const c = JSON.parse(fs.readFileSync(
+              path.join('golden-src', process.env.GOLDEN_DIR, process.env.CASE, 'case.json'), 'utf8'));
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              'head_sha=' + c.head_sha + '\n' + 'base_sha=' + c.base_sha + '\n');
+          "
+
+      # The head checkout below deletes the whole workspace (the root is not a
+      # git repository yet, so actions/checkout empties it whatever `clean`
+      # says), and the model reads the workspace, so the case files with their
+      # expected verdict live outside it from here on.
+      - name: Move golden files out of workspace
+        run: mv golden-src "$RUNNER_TEMP/golden-src"
+
+      - name: Checkout case head (data only)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.case.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout: |
+            .github/verifier
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Detect mutation patch
+        id: patch
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/golden-src/$GOLDEN_DIR/$CASE/mutation.patch" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The second model must read the same mutated tree as the first run.
+      - name: Apply mutation patch (data only)
+        if: steps.patch.outputs.present == 'true'
+        env:
+          BASE_SHA: ${{ steps.case.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.case.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          node factory/verifier/eval/golden-mutation.js --repo . \
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --patch "$RUNNER_TEMP/golden-src/$GOLDEN_DIR/$CASE/mutation.patch" \
+            --out-dir "$RUNNER_TEMP/mutation"
+
+      - name: Download first-run inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: case-${{ matrix.case }}
+          path: first-run
+
+      # Only the inputs are carried over, matching acceptance-verifier.yml's
+      # own "Restore first run inputs" step: the first run's own verdict must
+      # not be visible to the second model.
+      - name: Restore first-run inputs
+        run: |
+          set -euo pipefail
+          rm -rf .verifier spec-lint.json
+          cp -R first-run/.verifier .verifier
+          cp first-run/spec-lint.json spec-lint.json
+          rm -rf first-run
+
+      - name: Render prompt and schema
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/verifier"
+          node factory/verifier/risk-zones.js --config trusted/.github/verifier/risk-zones.json \
+            --prompt-out "$RUNNER_TEMP/verifier/prompt.md" --schema-out "$RUNNER_TEMP/verifier/schema.json"
+
+      - name: Run verifier (second run)
+        id: codex
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ runner.temp }}/verifier/prompt.md
+          output-schema-file: ${{ runner.temp }}/verifier/schema.json
+          output-file: verdict2.json
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-version: ${{ env.CODEX_VERSION }}
+          model: ${{ inputs.model }}
+          effort: high
+
+      - name: Check references (second run)
+        if: always() && hashFiles('verdict2.json') != ''
+        run: node factory/verifier/verdict.js --check-refs verdict2.json --root . --out refs-problems2.json --issue .verifier/issue.md --spec spec-lint.json
+
+      - name: Upload second-run result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: case-second-${{ matrix.case }}
+          path: |
+            verdict2.json
+            refs-problems2.json
+          if-no-files-found: warn
+
+  summarize:
+    name: Summarize
+    needs: [discover, verify-case, verify-case-second]
+    if: always() && needs.discover.result == 'success' && needs.discover.outputs.cases != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GOLDEN_DIR: ${{ needs.discover.outputs.golden_dir }}
+    steps:
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout: |
+            .factory
+            .github/verifier
+            ${{ needs.discover.outputs.golden_dir }}
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install factory dependencies
+        working-directory: factory
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      - name: Download first-run results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: case-*
+          path: results-raw
+        continue-on-error: true
+
+      # Reconciles each case's two runs with the same verifier/verdict.js
+      # the real verifier uses, on this case's own frozen deterministic
+      # inputs and the project's trusted profile and configs. Spec approval
+      # (approval.json) and authorized exceptions (exceptions.json) are read
+      # from the case directory, never from the GitHub API, so the verdict
+      # does not depend on live labels or comments. A verdict of PASS or FAIL
+      # becomes that case's actual result, stored with the coded reasons from
+      # the verifier's result.json so verifier-eval.js can check that the
+      # expected reason is among them; NEEDS_HUMAN (the two runs disagree) is
+      # not PASS/FAIL, so verifier-eval.js counts it as a run failure — it
+      # means the case needs a human look, not that it matched or missed
+      # expected.
+      - name: Reconcile each case and write its result
+        env:
+          CASES: ${{ needs.discover.outputs.cases }}
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          echo "$CASES" | jq -r '.[]' > case-list.txt
+          while IFS= read -r CASE; do
+            FIRST="results-raw/case-$CASE"
+            SECOND="results-raw/case-second-$CASE"
+            if [ ! -d "$FIRST" ]; then
+              echo "no first-run artifact for case $CASE" >&2
+              continue
+            fi
+            ARGS=(--ci "$FIRST/ci.json" --spec "$FIRST/spec-lint.json" \
+              --scope "$FIRST/scope.json" --absence "$FIRST/absence.json" \
+              --tampering-scan "$FIRST/tampering-scan-result.json" \
+              --provenance "$FIRST/provenance.json" \
+              --required-checks trusted/.github/verifier/required-checks.json \
+              --allowed-models trusted/.github/verifier/allowed-models.json \
+              --project trusted --risk-zones trusted/.github/verifier/risk-zones.json)
+            if [ -f "$FIRST/refs-problems.json" ]; then ARGS+=(--refs-problems "$FIRST/refs-problems.json"); fi
+            if [ -f "$FIRST/refs-notes.json" ]; then ARGS+=(--refs-notes "$FIRST/refs-notes.json"); fi
+            CASE_DIR="trusted/$GOLDEN_DIR/$CASE"
+            if [ -f "$CASE_DIR/approval.json" ]; then ARGS+=(--approval "$CASE_DIR/approval.json"); fi
+            if [ -f "$CASE_DIR/exceptions.json" ]; then
+              jq -e 'type == "object"' "$CASE_DIR/exceptions.json" > /dev/null
+              if jq -e '.manual_verified == true' "$CASE_DIR/exceptions.json" > /dev/null; then ARGS+=(--manual-verified); fi
+              if jq -e '.test_removal_approved == true' "$CASE_DIR/exceptions.json" > /dev/null; then ARGS+=(--test-removal-approved); fi
+            fi
+            if [ -d "$SECOND" ]; then
+              ARGS+=(--second "$SECOND/verdict2.json" --second-refs-problems "$SECOND/refs-problems2.json")
+            fi
+            RESULT=$(node factory/verifier/verdict.js "$FIRST/verdict.json" --out "results/$CASE-comment.md" --result-out "results/$CASE-verdict.json" "${ARGS[@]}")
+            echo "case $CASE: $RESULT"
+            jq -c --arg actual "$RESULT" '{ actual: $actual, reasons: [(.reasons // [])[] | { code, id }], items: [(.items // [])[] | { id, statuses }] }' "results/$CASE-verdict.json" > "results/$CASE.json"
+          done < case-list.txt
+
+      # The case directory comes from the same trusted profile (--project).
+      - name: Summarize
+        run: node factory/verifier/eval/verifier-eval.js --project trusted results --out summary.md
+
+      - name: Publish job summary
+        if: always()
+        run: if [ -f summary.md ]; then cat summary.md >> "$GITHUB_STEP_SUMMARY"; fi

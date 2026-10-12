@@ -1,0 +1,31 @@
+name: Factory Separation
+
+# Project wrapper of the factory's reusable cross-side change gate. Copy it to
+# .github/workflows/factory-separation.yml of the project. The side patterns
+# come from .github/verifier/factory-separation.json and the owners from
+# .github/verifier/owners.json, both on the default branch; without the
+# config the check passes with a notice.
+#
+# The check run is named "<caller job name> / <called job name>", here
+# `Factory separation / Factory separation`; require that name in branch
+# protection.
+#
+# Pinning: the same full commit SHA as in acceptance-verifier.yml, in BOTH
+# places, i.e. the commit of the factory tag that package.json pins; a
+# different commit fails the check.
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  factory-separation:
+    name: Factory separation
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    uses: strakhovdenya/dark-factory/.github/workflows/factory-separation.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      factory-sha: 0123456789abcdef0123456789abcdef01234567

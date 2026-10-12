@@ -1,0 +1,743 @@
+name: Acceptance Verifier
+
+# Reusable workflow: independent check of a project PR against its GitHub Issue
+# (ADR-041). A project calls it from a short wrapper that runs on
+# `workflow_run` of its own `CI` workflow (examples/wrappers/acceptance-verifier.yml);
+# GitHub does not let a workflow in another repository subscribe to the
+# project's workflow_run, so the wrapper stays in the project.
+#
+# Trust boundary (a PR cannot change the verifier or its config):
+# - Verifier code (scripts, prompt, schema) comes only from the checkout of
+#   this repository at `factory-sha`. The wrapper calls this workflow at the
+#   same full SHA. Before anything runs, the `dark-factory` tag pinned in the
+#   project's package.json on its DEFAULT branch must resolve to that same
+#   commit; otherwise the verdict is FAIL. A floating reference (branch,
+#   latest, no tag) is rejected the same way.
+# - Project values come only from the project's default-branch checkout
+#   (`trusted/`, at github.sha, which workflow_run sets to the default branch
+#   head): the profile .factory/profile.json (branch template, enabled checks)
+#   and the trusted configs in .github/verifier/ (owners, required CI checks,
+#   allowed models, risk zones, tampering scan, issue contract).
+# - The PR head is checked out only as data (read-only sandbox, never executed,
+#   never read as verifier config).
+#
+# The result is published as a PR comment and as the commit status
+# `Acceptance Verifier` on the PR head commit (workflow_run jobs are not
+# attached to the PR). Advisory by default; with `enforce: true` (the
+# project's VERIFIER_ENFORCE=true) the status fails on a non-PASS verdict, and
+# the project can then require it in branch protection. After adding the
+# `manual-verified` or `test-removal-approved` label, re-run only the `Report`
+# job (labels are read live; the model is not called again). After
+# re-applying `spec-approved` (spec-approval.yml), re-run the whole workflow:
+# the spec approval is checked in `Verify`. When a v2 issue fails only on the
+# model's own judgement, `Verify second` runs the model once more on the first
+# run's inputs; runs that disagree give NEEDS_HUMAN.
+
+on:
+  workflow_call:
+    inputs:
+      factory-sha:
+        description: Full commit SHA of this repository the wrapper calls the workflow at; the project's pinned tag must resolve to it.
+        required: true
+        type: string
+      model:
+        description: Verifier model (the project's VERIFIER_MODEL variable); empty uses the action default.
+        required: false
+        default: ''
+        type: string
+      enforce:
+        description: Fail the `Acceptance Verifier` status on a non-PASS verdict (the project's VERIFIER_ENFORCE=true).
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      OPENAI_API_KEY:
+        description: Key for the verifier model; used only by the jobs that run the model.
+        required: true
+
+permissions: {}
+
+env:
+  # Backs both Codex steps' codex-version input and provenance.json's
+  # codex_version field, so all read the one value. See the pin comment on
+  # the Run verifier step below before bumping this.
+  CODEX_VERSION: 0.156.1
+  # This repository; the verifier code is checked out from it at factory-sha.
+  FACTORY_REPOSITORY: strakhovdenya/dark-factory
+  NODE_VERSION: 22
+
+jobs:
+  verify:
+    name: Verify
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      checks: read
+      statuses: read
+    outputs:
+      pr_number: ${{ steps.collect.outputs.pr_number }}
+      stale: ${{ steps.collect.outputs.stale }}
+      skip: ${{ steps.collect.outputs.skip }}
+      needs_second_run: ${{ steps.second.outputs.needs_second_run }}
+    steps:
+      - name: Checkout pull request head (data only)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Sparse checkout in cone mode always includes the root files, so
+      # package.json (the pinned factory tag) is there too.
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .factory
+            .github/verifier
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Production dependencies only (the profile loader's schema validator);
+      # no lifecycle scripts run.
+      - name: Install factory dependencies
+        working-directory: factory
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      # The issue number is read from the head branch with the project's
+      # branch template (profile `branchTemplate`). A branch the template does
+      # not match is not a task branch: nothing is verified or reported. An
+      # invalid profile fails the job after pr_number is set, so `Report`
+      # publishes FAIL.
+      - name: Collect inputs
+        id: collect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          EVENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          ISSUE_NUMBER=$(node -e '
+            const path = require("node:path");
+            const { loadProfile } = require(path.resolve("factory/profile/load"));
+            const template = loadProfile("trusted").branchTemplate;
+            if (!template.includes("{issue}")) {
+              throw new Error("profile branchTemplate has no {issue} placeholder");
+            }
+            const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const source = template
+              .split(/(\{issue\}|\{slug\})/)
+              .map((part) => (part === "{issue}" ? "([0-9]+)" : part === "{slug}" ? ".+" : escape(part)))
+              .join("");
+            const match = new RegExp(`^${source}$`).exec(process.argv[1]);
+            process.stdout.write(match ? match[1] : "");
+          ' "$BRANCH") || PROFILE_FAILED=true
+          if [ "${PROFILE_FAILED:-false}" != "true" ] && [ -z "$ISSUE_NUMBER" ]; then
+            echo "::notice::Branch $BRANCH does not match the profile branch template; not a task branch"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          PR_NUMBER="$EVENT_PR_NUMBER"
+          if [ -z "$PR_NUMBER" ]; then
+            PR_NUMBER=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+              --json number --jq '.[0].number // empty')
+          fi
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::No open pull request found for branch $BRANCH"
+            exit 1
+          fi
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+          PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+          CURRENT_HEAD=$(jq -r '.head.sha' <<< "$PR_JSON")
+          BASE_SHA=$(jq -r '.base.sha' <<< "$PR_JSON")
+          if [ "$CURRENT_HEAD" != "$HEAD_SHA" ]; then
+            echo "::notice::PR head moved to $CURRENT_HEAD; a newer CI run will trigger its own verification"
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "stale=false" >> "$GITHUB_OUTPUT"
+
+          if [ "${PROFILE_FAILED:-false}" = "true" ]; then
+            echo "::error::Project profile .factory/profile.json on the default branch is invalid; verdict is FAIL"
+            exit 1
+          fi
+
+          mkdir -p .verifier
+          gh issue view "$ISSUE_NUMBER" --json title,body \
+            --jq '"# " + .title + "\n\n" + .body' > .verifier/issue.md
+          if ! grep -qiE '^#{1,6}[[:space:]]+Acceptance Criteria' .verifier/issue.md; then
+            echo "::error::Issue #$ISSUE_NUMBER has no 'Acceptance Criteria' section; acceptance is impossible"
+            exit 1
+          fi
+          # Body alone (no title), read the same way spec-approval.yml reads it,
+          # so both sides hash identical input.
+          gh api "repos/$REPO/issues/$ISSUE_NUMBER" --jq '.body // ""' > .verifier/issue-body.md
+          gh api --paginate "repos/$REPO/issues/$ISSUE_NUMBER/comments" \
+            --jq '.[] | {user: {login: .user.login}, body}' | jq -s '.' \
+            > .verifier/issue-comments.json
+          git diff --name-status "$BASE_SHA"..."$HEAD_SHA" > .verifier/files.txt
+          git diff "$BASE_SHA"..."$HEAD_SHA" > .verifier/diff.patch
+
+          CHECKS=$(gh api --paginate "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+            --jq '.check_runs[] | {name, status, conclusion}' | jq -s '.')
+          STATUSES=$(gh api --paginate "repos/$REPO/commits/$HEAD_SHA/status" \
+            --jq '.statuses[] | {name: .context, state}' | jq -s '.')
+          jq -n --arg ci "$CI_CONCLUSION" --arg head "$HEAD_SHA" --argjson checks "$CHECKS" \
+            --argjson statuses "$STATUSES" \
+            '{head_sha: $head, ci_workflow_conclusion: $ci, checks: $checks, statuses: $statuses}' \
+            > .verifier/ci.json
+          cp .verifier/ci.json ci.json
+
+      # The two pins must name one commit: the factory tag from the project's
+      # default-branch package.json, resolved here, and factory-sha, the SHA
+      # the wrapper called this workflow at. A floating reference or a
+      # mismatch fails the job after pr_number is set, so `Report` publishes
+      # FAIL; nothing below runs scripts from an unverified checkout.
+      - name: Check factory pin
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        env:
+          FACTORY_SHA: ${{ inputs.factory-sha }}
+        run: |
+          set -euo pipefail
+          if ! TAG=$(node factory/verifier/factory-version.js tag --package trusted/package.json); then
+            echo "::error::The factory release pinned in package.json on the default branch is not a release tag"
+            exit 1
+          fi
+          git -C factory fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          TAG_SHA=$(git -C factory rev-parse "refs/tags/$TAG^{commit}")
+          if ! node factory/verifier/factory-version.js check \
+            --tag "$TAG" --tag-sha "$TAG_SHA" --wrapper-sha "$FACTORY_SHA"; then
+            echo "::error::Factory tag $TAG is commit $TAG_SHA, the wrapper calls $FACTORY_SHA"
+            echo "- factory pin: tag $TAG is $TAG_SHA, wrapper SHA $FACTORY_SHA (verdict will FAIL)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "- factory pin: $TAG ($FACTORY_SHA)" >> "$GITHUB_STEP_SUMMARY"
+
+      # Provenance for the PR comment (ADR-042, ISSUE-480 amendment): identifies
+      # exactly which issue-body version and which verifier code/model produced
+      # this run, so a stale comment from before a verifier change is never
+      # confused with a fresh one. Independent of Run verifier's own outcome
+      # (that step can fail/time out per the ISSUE-445/449 amendments above);
+      # a missing or malformed provenance.json fails the verdict (fail closed).
+      - name: Write provenance
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          VERIFIER_COMMIT: ${{ inputs.factory-sha }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          set -uo pipefail
+          # Both the hash and the jq write are inside this one `if !` condition
+          # (a grouped compound command), not just the hash: the default GitHub
+          # Actions bash shell runs with -e, and a command's exit status is
+          # exempted from -e only while it is (part of) an if-condition, never
+          # while it sits in a then/else branch — so a jq failure alone, if it
+          # were only inside the else branch, would abort the step immediately
+          # under -e and hard-fail the job instead of falling through to the
+          # cleanup below (INV-9).
+          if ! { ISSUE_BODY_SHA256=$(node factory/verifier/spec-hash.js hash .verifier/issue-body.md) && \
+            jq -n --arg head_sha "$HEAD_SHA" --arg verifier_commit "$VERIFIER_COMMIT" \
+              --arg issue_body_sha256 "$ISSUE_BODY_SHA256" --arg model "$MODEL" \
+              --arg codex_version "$CODEX_VERSION" \
+              '{head_sha: $head_sha, issue_body_sha256: $issue_body_sha256, verifier_commit: $verifier_commit, model: $model, codex_version: $codex_version}' \
+              > provenance.json; }; then
+            rm -f provenance.json
+            echo "::warning::Provenance could not be computed"
+          fi
+
+      # Deterministic Affects-scope check: compares the changed files with the issue's own
+      # "## Affects" paths/globs instead of relying on the model's out_of_scope_files.
+      # Independent of the codex step, so it runs even if that step later fails; a v2 issue
+      # without a readable scope.json fails closed in verdict.js.
+      - name: Compute Affects scope
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        run: node factory/verifier/affects-scope.js .verifier/issue.md .verifier/files.txt --out scope.json
+
+      # Deterministic test-tampering scan: parses .verifier/diff.patch for skip-style
+      # markers, lint/type suppressions, a disabled workflow step or its error handling
+      # relaxed, decreased coverageThreshold values and net-removed assertions. File
+      # classes come only from the trusted tampering-scan.json config; this step is
+      # independent of the model-based verification step below.
+      - name: Scan diff for test tampering
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        run: node factory/verifier/test-tampering-scan.js .verifier/diff.patch --config trusted/.github/verifier/tampering-scan.json --out tampering-scan-result.json
+
+      - name: Lint issue against contract
+        id: spec
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          if node factory/verifier/issue-lint.js .verifier/issue.md \
+            --contract trusted/.github/verifier/issue-contract.json \
+            --out spec-lint.json; then
+            echo "invalid=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "invalid=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Spec freeze (ADR-042, ISSUE-474 amendment): compares the current body
+      # hash with the latest github-actions[bot] `spec-approved` comment. A
+      # failure here leaves spec-approval.json absent, which the verdict treats
+      # as "spec approval was not checked" (fail closed) instead of failing the
+      # job and losing the other diagnostics.
+      - name: Check spec approval
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        run: |
+          set -uo pipefail
+          if ! node factory/verifier/spec-hash.js check --body .verifier/issue-body.md \
+            --comments .verifier/issue-comments.json --out spec-approval.json; then
+            rm -f spec-approval.json
+            echo "::warning::Spec approval could not be checked"
+          fi
+
+      # The model's prompt and output schema: the core prompt.md/schema.json
+      # with the risk zones of the project's trusted risk-zones.json. A missing
+      # or invalid config leaves them unrendered, so the model does not run and
+      # the verdict is FAIL; verdict.js also reports the config problem.
+      - name: Render prompt and schema
+        id: render
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/verifier"
+          node factory/verifier/risk-zones.js --config trusted/.github/verifier/risk-zones.json \
+            --prompt-out "$RUNNER_TEMP/verifier/prompt.md" --schema-out "$RUNNER_TEMP/verifier/schema.json"
+
+      # Pinned to v1.11: v1.12 hangs after Codex has printed its final message (openai/codex-action
+      # #150, #169, fix PR #151 not merged) and its root sudo wrapper keeps the step alive past its
+      # timeout. drop-sudo can run only once per job in both versions, so there is one attempt; a
+      # verdict that is missing or invalid after it is a FAIL (fail closed), never a hang.
+      # Do not bump this pin by hand or accept a Dependabot bump before reading ADR-041, ISSUE-449
+      # amendment. Move it only to a released version that contains the fix from
+      # openai/codex-action PR #151, and check that the first run finishes in minutes.
+      - name: Run verifier
+        id: codex
+        if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true' && steps.spec.outputs.invalid != 'true' && steps.render.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ runner.temp }}/verifier/prompt.md
+          output-schema-file: ${{ runner.temp }}/verifier/schema.json
+          output-file: verdict.json
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-version: ${{ env.CODEX_VERSION }}
+          model: ${{ inputs.model }}
+          effort: high
+
+      - name: Verifier diagnostics
+        if: always() && steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        env:
+          CODEX_OUTCOME: ${{ steps.codex.outcome }}
+          RENDER_OUTCOME: ${{ steps.render.outcome }}
+        run: |
+          {
+            echo "### Verifier diagnostics"
+            echo "- prompt and schema: ${RENDER_OUTCOME:-skipped}"
+            echo "- codex step: ${CODEX_OUTCOME:-skipped}"
+            if [ -f verdict.json ]; then
+              echo "- verdict.json: $(wc -c < verdict.json) bytes"
+              if jq -e '.criteria | type == "array"' verdict.json > /dev/null 2>&1; then
+                echo "- verdict.json: valid shape"
+              else
+                echo "- verdict.json: invalid (verdict will FAIL)"
+              fi
+            else
+              echo "- verdict.json: absent (verdict will FAIL)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check references
+        if: always() && steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true' && hashFiles('verdict.json') != ''
+        run: node factory/verifier/verdict.js --check-refs verdict.json --root . --out refs-problems.json --issue .verifier/issue.md --spec spec-lint.json --absence-out absence.json --notes-out refs-notes.json
+
+      # Second run: true only for a v2 issue whose FAIL comes
+      # entirely from model judgement. Computed from the same deterministic inputs the Report job
+      # uses; labels are not read here, so UNVERIFIABLE counts as a model reason. Any error
+      # (including a failed factory pin) leaves the output false: without a trustworthy first
+      # verdict there is nothing to re-run.
+      - name: Decide second run
+        id: second
+        if: always() && steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        run: |
+          set -uo pipefail
+          ARGS=(--ci ci.json --spec spec-lint.json --approval spec-approval.json \
+            --required-checks trusted/.github/verifier/required-checks.json \
+            --tampering-scan tampering-scan-result.json --provenance provenance.json \
+            --allowed-models trusted/.github/verifier/allowed-models.json \
+            --project trusted --risk-zones trusted/.github/verifier/risk-zones.json)
+          if [ -f scope.json ]; then ARGS+=(--scope scope.json); fi
+          if [ -f refs-problems.json ]; then ARGS+=(--refs-problems refs-problems.json); fi
+          if [ -f absence.json ]; then ARGS+=(--absence absence.json); fi
+          if ! RESULT=$(node factory/verifier/verdict.js verdict.json --needs-second-run "${ARGS[@]}"); then
+            RESULT=false
+          fi
+          if [ "$RESULT" != "true" ]; then RESULT=false; fi
+          echo "needs_second_run=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "- needs second run: $RESULT" >> "$GITHUB_STEP_SUMMARY"
+
+      # .verifier/ carries the first run's inputs for `Verify second` (INV-8); it is a hidden
+      # directory, which upload-artifact skips unless include-hidden-files is set.
+      - name: Upload verdict
+        if: always() && steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict
+          include-hidden-files: true
+          path: |
+            .verifier/
+            verdict.json
+            refs-problems.json
+            refs-notes.json
+            ci.json
+            spec-lint.json
+            absence.json
+            spec-approval.json
+            scope.json
+            tampering-scan-result.json
+            provenance.json
+          if-no-files-found: ignore
+
+  # A separate job because drop-sudo runs only once per job (see the pin comment in `Verify`,
+  # above). Reuses the first run's inputs from the `verdict` artifact instead of collecting them
+  # again (INV-8); the PR head is checked out only as data, at the same head_sha. It runs only
+  # after `Verify` succeeded, so the factory pin is already verified.
+  verify-second:
+    name: Verify second
+    needs: verify
+    if: needs.verify.outputs.needs_second_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pull request head (data only)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .github/verifier
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download first run inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: verdict
+          path: first-run
+
+      # Only the inputs are carried over: the first run's verdict must not be visible to the
+      # second model, which judges the same data independently. Anything the PR itself committed
+      # under these names is removed first, so the PR cannot supply its own inputs or verdict
+      # (cp -R into an existing directory would nest the copy and keep the PR's files).
+      - name: Restore first run inputs
+        run: |
+          set -euo pipefail
+          rm -rf .verifier spec-lint.json verdict2.json refs-problems2.json
+          cp -R first-run/.verifier .verifier
+          cp first-run/spec-lint.json spec-lint.json
+          rm -rf first-run
+
+      - name: Render prompt and schema
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/verifier"
+          node factory/verifier/risk-zones.js --config trusted/.github/verifier/risk-zones.json \
+            --prompt-out "$RUNNER_TEMP/verifier/prompt.md" --schema-out "$RUNNER_TEMP/verifier/schema.json"
+
+      # Same pin, prompt, schema, model and Codex CLI as `Run verifier` in `Verify`; see the pin
+      # comment there (openai/codex-action #150/#169, fix PR #151 not merged) before changing it.
+      # One attempt; a missing or invalid verdict2.json is a FAIL.
+      - name: Run verifier (second run)
+        id: codex
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ runner.temp }}/verifier/prompt.md
+          output-schema-file: ${{ runner.temp }}/verifier/schema.json
+          output-file: verdict2.json
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-version: ${{ env.CODEX_VERSION }}
+          model: ${{ inputs.model }}
+          effort: high
+
+      - name: Check references (second run)
+        if: always() && hashFiles('verdict2.json') != ''
+        run: node factory/verifier/verdict.js --check-refs verdict2.json --root . --out refs-problems2.json --issue .verifier/issue.md --spec spec-lint.json
+
+      - name: Upload second verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-second
+          path: |
+            verdict2.json
+            refs-problems2.json
+          if-no-files-found: ignore
+
+  report:
+    name: Report
+    needs: [verify, verify-second]
+    if: always() && needs.verify.outputs.pr_number != '' && needs.verify.outputs.stale != 'true' && needs.verify.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .factory
+            .github/verifier
+          persist-credentials: false
+
+      # When `Verify` failed (including a factory pin mismatch) every input is
+      # removed below, so this code only renders FAIL.
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install factory dependencies
+        working-directory: factory
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      - name: Download verdict
+        uses: actions/download-artifact@v4
+        with:
+          name: verdict
+        continue-on-error: true
+
+      - name: Download second verdict
+        if: needs.verify-second.result != 'skipped'
+        uses: actions/download-artifact@v4
+        with:
+          name: verdict-second
+        continue-on-error: true
+
+      # Only the timeline decides authorization (ADR-042 amendment, ISSUE-473):
+      # a `labeled` event by an owners.json login, not followed by an
+      # `unlabeled` event for the same label. Owners come only from the trusted
+      # default-branch checkout and the checker script only from the factory
+      # (INV-4). A failed timeline fetch yields an empty timeline, so the label
+      # is not counted rather than failing the job (INV-5). Presence (`present`)
+      # is read from this same timeline snapshot, not a second
+      # `gh api .../labels` call: two separate calls could race with a label
+      # change between them and report a label that is currently applied as
+      # neither present nor authorized. `test-removal-approved` (ADR-042
+      # amendment, ISSUE-535) is authorized the same way from the same
+      # timeline.json; it excuses only the scanner's assertion losses. Both
+      # label names are core constants, the same in every project.
+      - name: Check label authorization
+        id: labelauth
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.verify.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          if ! TIMELINE=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/timeline" \
+            --jq '.[] | select(.event == "labeled" or .event == "unlabeled") | {event, label, actor}' \
+            | jq -s '.'); then
+            TIMELINE='[]'
+          fi
+          echo "$TIMELINE" > timeline.json
+          RESULT=$(node factory/verifier/label-authority.js \
+            --timeline timeline.json --owners trusted/.github/verifier/owners.json \
+            --label manual-verified --json)
+          echo "present=$(jq -r '.present' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "authorized=$(jq -r '.authorized' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "actor=$(jq -r '.actor // empty' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          RESULT=$(node factory/verifier/label-authority.js \
+            --timeline timeline.json --owners trusted/.github/verifier/owners.json \
+            --label test-removal-approved --json)
+          echo "test_removal_present=$(jq -r '.present' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "test_removal_authorized=$(jq -r '.authorized' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "test_removal_actor=$(jq -r '.actor // empty' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+
+      - name: Compute verdict and comment
+        id: verdict
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          SECOND_RESULT: ${{ needs.verify-second.result }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.verify.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+          MANUAL_VERIFIED: ${{ steps.labelauth.outputs.present }}
+          LABEL_AUTHORIZED: ${{ steps.labelauth.outputs.authorized }}
+          LABEL_ACTOR: ${{ steps.labelauth.outputs.actor }}
+          TEST_REMOVAL_PRESENT: ${{ steps.labelauth.outputs.test_removal_present }}
+          TEST_REMOVAL_AUTHORIZED: ${{ steps.labelauth.outputs.test_removal_authorized }}
+          TEST_REMOVAL_ACTOR: ${{ steps.labelauth.outputs.test_removal_actor }}
+        run: |
+          set -euo pipefail
+          if [ "$VERIFY_RESULT" != "success" ]; then
+            rm -f verdict.json refs-problems.json refs-notes.json ci.json spec-lint.json absence.json spec-approval.json scope.json tampering-scan-result.json provenance.json verdict2.json refs-problems2.json
+          fi
+          ARGS=(--ci ci.json --spec spec-lint.json --approval spec-approval.json \
+            --required-checks trusted/.github/verifier/required-checks.json \
+            --tampering-scan tampering-scan-result.json --provenance provenance.json \
+            --allowed-models trusted/.github/verifier/allowed-models.json \
+            --project trusted --risk-zones trusted/.github/verifier/risk-zones.json)
+          if [ -f scope.json ]; then ARGS+=(--scope scope.json); fi
+          if [ "$MANUAL_VERIFIED" = "true" ]; then
+            if [ "$LABEL_AUTHORIZED" = "true" ]; then
+              ARGS+=(--manual-verified)
+            elif [ -n "$LABEL_ACTOR" ]; then
+              ARGS+=(--manual-verified-ignored "$LABEL_ACTOR")
+            else
+              ARGS+=(--manual-verified-ignored-unknown)
+            fi
+          fi
+          if [ "$TEST_REMOVAL_PRESENT" = "true" ]; then
+            if [ "$TEST_REMOVAL_AUTHORIZED" = "true" ]; then
+              ARGS+=(--test-removal-approved)
+            elif [ -n "$TEST_REMOVAL_ACTOR" ]; then
+              ARGS+=(--test-removal-ignored "$TEST_REMOVAL_ACTOR")
+            else
+              ARGS+=(--test-removal-ignored-unknown)
+            fi
+          fi
+          if [ -f refs-problems.json ]; then ARGS+=(--refs-problems refs-problems.json); fi
+          if [ -f refs-notes.json ]; then ARGS+=(--refs-notes refs-notes.json); fi
+          if [ -f absence.json ]; then ARGS+=(--absence absence.json); fi
+          # A second run that ran but left no verdict2.json is an invalid second report (FAIL),
+          # not "no second run" (INV-9), so the paths are passed whether or not the files exist.
+          if [ "$SECOND_RESULT" != "skipped" ]; then
+            ARGS+=(--second verdict2.json --second-refs-problems refs-problems2.json)
+          fi
+          RESULT=$(node factory/verifier/verdict.js verdict.json --out comment.md --result-out result.json "${ARGS[@]}")
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.verify.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          COMMENT_ID=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- acceptance-verifier -->"))) | .id' \
+            | sed -n 1p)
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" -F body=@comment.md > /dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@comment.md > /dev/null
+          fi
+
+      - name: Set commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RESULT: ${{ steps.verdict.outputs.result }}
+          VERIFIER_ENFORCE: ${{ inputs.enforce }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # Any verdict other than PASS, including NEEDS_HUMAN (runs disagree), is a non-pass:
+        # `failure` under enforce, otherwise `success` with "Advisory, verdict: NEEDS_HUMAN".
+        run: |
+          set -euo pipefail
+          STATE=success
+          DESCRIPTION="Verdict: $RESULT"
+          if [ "$RESULT" != "PASS" ]; then
+            if [ "$VERIFIER_ENFORCE" = "true" ]; then
+              STATE=failure
+            else
+              DESCRIPTION="Advisory, verdict: $RESULT"
+            fi
+          fi
+          gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f context="Acceptance Verifier" \
+            -f description="$DESCRIPTION" -f target_url="$RUN_URL" > /dev/null
+
+      # Historical record of this round for Calibration Judge: the PR comment is updated in place,
+      # so an earlier round's comment is lost once the next round publishes, and a workflow_run
+      # run's own metadata names the default branch, not the PR. Both steps run last and never
+      # fail the job, so they cannot affect the comment or the status above.
+      - name: Write verdict report
+        if: always()
+        env:
+          PR_NUMBER: ${{ needs.verify.outputs.pr_number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RESULT: ${{ steps.verdict.outputs.result }}
+        run: |
+          if ! jq -n --arg pr "$PR_NUMBER" --arg head "$HEAD_SHA" --arg verdict "$RESULT" \
+            'def orNull: if . == "" then null else . end;
+             {pr_number: ($pr | orNull), head_sha: ($head | orNull), verdict: ($verdict | orNull)}' \
+            > verdict-report.json; then
+            rm -f verdict-report.json
+            echo "::warning::verdict-report.json could not be written"
+          fi
+
+      - name: Upload verdict report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-report
+          path: |
+            verdict-report.json
+            comment.md
+            timeline.json
+            result.json
+          if-no-files-found: ignore
