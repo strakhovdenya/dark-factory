@@ -49,6 +49,10 @@ function readPackageFilesField(rootDir) {
   if (!Array.isArray(pkg.files) || pkg.files.some((entry) => typeof entry !== 'string')) {
     throw new Error('core-literals: package.json field "files" is missing or not an array of strings');
   }
+  const bad = pkg.files.find((entry) => /[*?[\]{}!]/.test(entry));
+  if (bad !== undefined) {
+    throw new Error(`core-literals: package.json "files" entry "${bad}" is a pattern; list plain directories or files`);
+  }
   return pkg.files.map(normalizeEntry);
 }
 
@@ -68,7 +72,8 @@ function findLiterals(rootDir) {
   for (const file of listTrackedFiles(rootDir)) {
     if (!isInCore(file, packageEntries)) continue;
     const fullPath = path.join(rootDir, file);
-    if (!fs.existsSync(fullPath)) continue;
+    const stat = fs.lstatSync(fullPath, { throwIfNoEntry: false });
+    if (!stat || !stat.isFile()) continue;
     const content = fs.readFileSync(fullPath);
     if (content.includes(0)) continue;
     const rules = RULES.filter((rule) => !rule.skip.includes(file));

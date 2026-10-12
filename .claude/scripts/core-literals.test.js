@@ -96,4 +96,7 @@ test('fails instead of returning empty result without git or files field', (t) =
   const noFiles = makeRepo(t, {});
   fs.writeFileSync(path.join(noFiles, 'package.json'), '{}');
   assert.throws(() => findLiterals(noFiles), /"files"/);
+
+  const glob = makeRepo(t, {}, { pkgFiles: ['skills/**'] });
+  assert.throws(() => findLiterals(glob), /is a pattern/);
 });
