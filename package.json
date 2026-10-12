@@ -1,0 +1,17 @@
+{
+  "name": "dark-factory",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AI software factory: Ralph, Acceptance Verifier, Claude Code skills, agents and hooks",
+  "files": [
+    "skills/",
+    "agents/",
+    "hooks/"
+  ],
+  "scripts": {
+    "test": "node --test \"*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \".claude/**/*.test.js\""
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
