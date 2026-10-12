@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { loadProfile } = require('../../profile/load');
+const { CORE_CHECK_NAMES } = require('../../verifier/checks');
 
 const FIXTURES = path.join(__dirname, '..', '..', 'test', 'fixtures', 'profiles');
 const monorepoRoot = path.join(FIXTURES, 'monorepo');
@@ -42,6 +43,9 @@ test('jobflow profile keeps current project values', () => {
     ['apps/api', 'apps/web', 'scripts', '.claude/ralph'],
   );
   assert.equal(profile.verifier.goldenDir, '.github/verifier/golden');
+  // Every check the verifier ran before checks became modules stays on, so
+  // the project's verdicts do not change.
+  assert.deepEqual(profile.verifier.checks, CORE_CHECK_NAMES);
   assert.deepEqual(profile.apps.map((app) => app.path), ['apps/api', 'apps/web']);
 });
 
