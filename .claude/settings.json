@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint-hook.js\" || true",
+            "statusMessage": "Auto-fixing lint..."
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/typecheck-hook.js\" || true",
+            "statusMessage": "Type-checking..."
+          }
+        ]
+      }
+    ]
+  }
+}

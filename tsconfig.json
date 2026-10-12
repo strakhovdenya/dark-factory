@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2023",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "types": ["node"],
+    "strict": false,
+    "skipLibCheck": true
+  },
+  "include": ["*.js", ".claude/**/*.js", "skills/**/*.js", "agents/**/*.js", "hooks/**/*.js"],
+  "exclude": ["node_modules"]
+}
