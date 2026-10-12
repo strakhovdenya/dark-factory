@@ -8,8 +8,9 @@
     "moduleResolution": "node16",
     "types": ["node"],
     "strict": false,
+    "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["*.js", ".claude/**/*.js", "skills/**/*.js", "agents/**/*.js", "hooks/**/*.js"],
+  "include": ["*.js", ".claude/**/*.js", "skills/**/*.js", "agents/**/*.js", "hooks/**/*.js", "profile/**/*.js"],
   "exclude": ["node_modules"]
 }
