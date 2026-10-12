@@ -1,1 +1,24 @@
+# Dependencies
 node_modules/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright MCP screenshots/snapshots (local debugging artifacts)
+.playwright-mcp/
+
+# Personal local Claude Code permissions (never committed)
+.claude/settings.local.json
