@@ -1,0 +1,18 @@
+{
+  "branchTemplate": "task/ISSUE-{issue}-{slug}",
+  "apps": [
+    {
+      "name": "main",
+      "path": ".",
+      "install": [{ "argv": ["npm", "install"], "cwd": "." }],
+      "gate": [
+        { "argv": ["node", "node_modules/eslint/bin/eslint.js", "."], "cwd": "." },
+        { "argv": ["node", "node_modules/vitest/vitest.mjs", "run"], "cwd": "." }
+      ]
+    }
+  ],
+  "docOnlyPathPatterns": ["*.md", "docs/"],
+  "protectedPaths": [".github/", "scripts/"],
+  "ruleFiles": ["CLAUDE.md"],
+  "ralph": { "enabled": false }
+}

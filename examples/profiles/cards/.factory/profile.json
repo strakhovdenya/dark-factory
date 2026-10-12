@@ -1,0 +1,36 @@
+{
+  "branchTemplate": "task/ISSUE-{issue}-{slug}",
+  "githubProject": 1,
+  "apps": [
+    {
+      "name": "cards",
+      "path": ".",
+      "install": [{ "argv": ["npm", "install"], "cwd": "." }],
+      "gate": [
+        { "argv": ["node", "node_modules/eslint/bin/eslint.js", ".", "--max-warnings=0"], "cwd": "." },
+        { "argv": ["node", "node_modules/prettier/bin/prettier.cjs", "--check", "src/**/*.{js,jsx,ts,tsx,css,md,json}"], "cwd": "." },
+        { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "." },
+        { "argv": ["node", "node_modules/next/dist/bin/next", "build"], "cwd": "." }
+      ]
+    }
+  ],
+  "docOnlyPathPatterns": ["*.md", "docs/"],
+  "protectedPaths": [".claude/", "scripts/", ".github/", ".husky/", ".git/", "docs/"],
+  "labels": { "humanNeeded": "ralph-needs-db-change" },
+  "skillRules": [
+    {
+      "path": "src",
+      "extensions": [".ts", ".tsx"],
+      "label": "tests (vitest)",
+      "skills": ["vitest"]
+    }
+  ],
+  "ruleFiles": ["CLAUDE.md"],
+  "docs": { "prd": "project-management/prd", "plans": "project-management/plan" },
+  "agentEnvironment": [
+    "No running next dev server; starting a dev server in the background is forbidden.",
+    "No access to the real Supabase (neither database nor auth).",
+    "No browser and no Playwright tools."
+  ],
+  "ralph": { "enabled": true, "techDebtTrackerIssue": 1, "enabledSteps": [] }
+}
