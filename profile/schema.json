@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "dark-factory project profile",
+  "description": "Contents of .factory/profile.json in a consumer project. The profile only adds project-specific values to the factory core; it cannot remove or override anything the core ships. Every element is off unless the profile enables it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["branchTemplate", "apps"],
+  "properties": {
+    "$schema": {
+      "description": "Optional reference to this schema, for editor support.",
+      "type": "string"
+    },
+    "branchTemplate": {
+      "description": "Branch name template for task branches. Placeholders: {issue} (issue number) and {slug} (title slug), for example \"task/ISSUE-{issue}-{slug}\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "githubProject": {
+      "description": "Optional number of the GitHub Project the project issues are tracked in.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "apps": {
+      "description": "Application layout of the project. A single-package project lists one app with path \".\"; a monorepo lists one app per package.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "path"],
+        "properties": {
+          "name": {
+            "description": "Short app name, unique within the profile.",
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "description": "App directory relative to the project root; \".\" for a package in the root.",
+            "type": "string",
+            "minLength": 1
+          },
+          "install": {
+            "description": "Dependency installation steps run in a fresh clone, in order. Optional; no steps by default.",
+            "type": "array",
+            "items": { "$ref": "#/$defs/command" }
+          },
+          "gate": {
+            "description": "Gate commands run for this app before a commit, in order. Optional; no gate by default.",
+            "type": "array",
+            "items": { "$ref": "#/$defs/command" }
+          }
+        }
+      }
+    },
+    "docOnlyPathPatterns": {
+      "description": "Glob patterns of paths whose changes are documentation only and do not count as code changes.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "protectedPaths": {
+      "description": "Glob patterns of paths the Ralph agent must not change.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "labels": {
+      "description": "GitHub label names used by the factory.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "humanNeeded": {
+          "description": "Label that marks an issue or PR as needing a human.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "verifier": {
+      "description": "Acceptance Verifier settings. The verdict itself is computed by code; these values only locate inputs and name the result.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verdictCheckName": {
+          "description": "Name of the status check that carries the verifier verdict.",
+          "type": "string",
+          "minLength": 1
+        },
+        "goldenDir": {
+          "description": "Optional directory of reference cases (inputs with an expected verdict), relative to the project root.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "skillRules": {
+      "description": "Project entries of the shared \"path to skills\" table. They are added to the core table and cannot remove or override its entries.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "extensions", "label", "skills"],
+        "properties": {
+          "path": {
+            "description": "Path prefix, relative to the project root, that the entry applies to.",
+            "type": "string",
+            "minLength": 1
+          },
+          "extensions": {
+            "description": "File extensions (with the leading dot) that the entry applies to.",
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^\\.[^.\\s]+$" }
+          },
+          "label": {
+            "description": "Human-readable label of the entry, shown in hook messages.",
+            "type": "string",
+            "minLength": 1
+          },
+          "skills": {
+            "description": "Names of skills that must be loaded before editing matching files.",
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "extraMetaskills": {
+      "description": "Names of metaskills installed in the project in addition to the base set of the package.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "ruleFiles": {
+      "description": "Project rule files (for example a CLAUDE.md) that agents must read, relative to the project root.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "overlays": {
+      "description": "Project overlays of document templates, relative to .factory/overlays/. An overlay can only add to a core template.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prd": { "description": "Overlay file for the PRD template.", "type": "string", "minLength": 1 },
+        "plan": { "description": "Overlay file for the plan template.", "type": "string", "minLength": 1 },
+        "issue": { "description": "Overlay file for the issue template.", "type": "string", "minLength": 1 }
+      }
+    },
+    "docs": {
+      "description": "Locations of project documents, relative to the project root.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prd": { "description": "Directory with PRD documents.", "type": "string", "minLength": 1 },
+        "plans": { "description": "Directory with plans.", "type": "string", "minLength": 1 },
+        "adr": { "description": "Directory with architecture decision records.", "type": "string", "minLength": 1 }
+      }
+    },
+    "hooks": {
+      "description": "Commands of the lint and typecheck hooks. A hook is inactive for paths that no entry matches.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lint": {
+          "description": "Lint command per path.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/hookCommand" }
+        },
+        "typecheck": {
+          "description": "Typecheck command per path.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/hookCommand" }
+        }
+      }
+    },
+    "agentEnvironment": {
+      "description": "Environment constraints stated to the Ralph agent in its prompt (for example tools that are unavailable). The sandbox section is added by a later schema revision.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "ralph": {
+      "description": "Ralph, the autonomous issue-executing agent. Off unless \"enabled\" is true; a disabled Ralph needs no other fields.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "description": "Whether Ralph runs in this project. When false, no other ralph field is required.",
+          "type": "boolean"
+        },
+        "techDebtTrackerIssue": {
+          "description": "Number of the issue that collects tech-debt items. Required when Ralph is enabled.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "enabledSteps": {
+          "description": "Names of optional Ralph steps switched on for this project. Steps not listed stay off. Required (may be empty) when Ralph is enabled.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "if": {
+        "properties": { "enabled": { "const": true } },
+        "required": ["enabled"]
+      },
+      "then": {
+        "required": ["techDebtTrackerIssue", "enabledSteps"]
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "description": "A command as an argument array (not a shell string) plus its working directory.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argv", "cwd"],
+      "properties": {
+        "argv": {
+          "description": "Program followed by its arguments: [program, ...args].",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "cwd": {
+          "description": "Working directory relative to the project root; \".\" for the root.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "hookCommand": {
+      "description": "A hook command bound to the paths it applies to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "command"],
+      "properties": {
+        "paths": {
+          "description": "Glob patterns of the paths the command applies to.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "command": { "$ref": "#/$defs/command" }
+      }
+    }
+  }
+}
