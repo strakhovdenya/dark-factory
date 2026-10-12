@@ -8,18 +8,13 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { lint, parseArgs } = require('./issue-lint');
+const { loadCore } = require('./issue-contract');
 
-const ROOT = path.resolve(__dirname, '..');
 const SCRIPT = path.join(__dirname, 'issue-lint.js');
-// The contract moves into the core with its own issue; until then the linter is tested on a copy.
-const CONTRACT_DIR = path.join(ROOT, 'test', 'fixtures', 'verifier');
-const CONTRACT_PATH = path.join(CONTRACT_DIR, 'issue-contract.json');
-const CONTRACT = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'));
+const CONTRACT = loadCore();
 
-// A project root holding the contract where the CLI looks for it by default.
+// A project root without an overlay file: the CLI then lints against the core contract.
 const PROJECT = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-lint-project-'));
-fs.mkdirSync(path.join(PROJECT, '.github', 'verifier'), { recursive: true });
-fs.copyFileSync(CONTRACT_PATH, path.join(PROJECT, '.github', 'verifier', 'issue-contract.json'));
 test.after(() => fs.rmSync(PROJECT, { recursive: true }));
 
 const validIssue = () => `## Контекст
@@ -64,10 +59,11 @@ const runCli = (markdown, extra = []) => {
   return { dir, run };
 };
 
-test('parseArgs accepts contract, require-v2 and out', () => {
-  assert.deepStrictEqual(parseArgs(['i.md', '--contract', 'c.json', '--require-v2', '--out', 'o.json']), {
-    file: 'i.md', contract: 'c.json', requireV2: true, out: 'o.json',
+test('parseArgs accepts overlay, require-v2, has-role and out', () => {
+  assert.deepStrictEqual(parseArgs(['i.md', '--overlay', 'c.json', '--require-v2', '--out', 'o.json']), {
+    file: 'i.md', overlay: 'c.json', requireV2: true, out: 'o.json', hasRole: null,
   });
+  assert.strictEqual(parseArgs(['i.md', '--has-role', 'acceptance']).hasRole, 'acceptance');
 });
 
 test('CLI emits the documented JSON shape and exits 0 for valid v2', () => {
@@ -179,8 +175,58 @@ test('ignores item-looking lines inside fenced code', () => {
 });
 
 test('the example fenced block in issue-contract.md passes with require-v2', () => {
-  const md = fs.readFileSync(path.join(CONTRACT_DIR, 'issue-contract.md'), 'utf8');
+  const md = fs.readFileSync(path.join(__dirname, 'issue-contract.md'), 'utf8');
   const match = md.match(/## Пример\s+```markdown\n([\s\S]*?)\n```/);
   assert.ok(match, 'example block not found');
   assert.deepStrictEqual(lint(match[1], CONTRACT, { requireV2: true }).problems, []);
+});
+
+test('accepts russian and english section names', () => {
+  assert.deepStrictEqual(problems(validIssue()), []);
+  assert.deepStrictEqual(problems(replace('## Контекст', '## Context')), []);
+});
+
+test('section names match case-sensitively and ignore trailing spaces', () => {
+  assert.ok(problems(replace('## Контекст', '## context')).includes('missing required section: Контекст'));
+  assert.deepStrictEqual(problems(replace('## Контекст', '## Контекст  ')), []);
+  assert.deepStrictEqual(problems(replace('## Контекст', '## Context ')), []);
+});
+
+const withOverlay = (overlay, markdown, extra = []) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-lint-overlay-'));
+  const issue = path.join(dir, 'issue.md');
+  const file = path.join(dir, 'overlay.json');
+  fs.writeFileSync(issue, markdown);
+  fs.writeFileSync(file, typeof overlay === 'string' ? overlay : JSON.stringify(overlay));
+  const run = spawnSync(process.execPath, [SCRIPT, issue, '--overlay', file, ...extra], { encoding: 'utf8', cwd: PROJECT });
+  fs.rmSync(dir, { recursive: true });
+  return run;
+};
+
+test('CLI requires a section the overlay added', () => {
+  const overlay = { sections: [{ title: 'Rollout', required: true }] };
+  const run = withOverlay(overlay, validIssue(), ['--require-v2']);
+  assert.strictEqual(run.status, 1);
+  assert.ok(JSON.parse(run.stdout).problems.includes('missing required section: Rollout'));
+  assert.strictEqual(withOverlay(overlay, `${validIssue()}
+## Rollout
+План.
+`, ['--require-v2']).status, 0);
+});
+
+test('CLI reports an invalid overlay as a spec problem and exits 1', () => {
+  const run = withOverlay({ removeSections: ['Acceptance Criteria'] }, validIssue());
+  assert.strictEqual(run.status, 1);
+  const result = JSON.parse(run.stdout);
+  assert.strictEqual(result.format, 'v2');
+  assert.ok(result.problems[0].startsWith('contract overlay invalid:'));
+  assert.ok(result.problems[0].includes('Acceptance Criteria'));
+  assert.strictEqual(withOverlay('{not json', validIssue()).status, 1);
+});
+
+test('has-role finds the acceptance section under any of its names, exits 2 on a bad overlay', () => {
+  const found = withOverlay({}, validIssue(), ['--has-role', 'acceptance']);
+  assert.strictEqual(found.status, 0);
+  assert.strictEqual(withOverlay({}, '## Context\nx\n', ['--has-role', 'acceptance']).status, 1);
+  assert.strictEqual(withOverlay({ nope: 1 }, validIssue(), ['--has-role', 'acceptance']).status, 2);
 });

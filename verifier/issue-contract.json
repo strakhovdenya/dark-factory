@@ -2,11 +2,21 @@
   "version": 2,
   "headingLevel": 2,
   "sections": [
-    { "title": "Контекст", "required": true, "idPrefix": null },
-    { "title": "Affects", "required": true, "idPrefix": null },
+    {
+      "title": "Контекст",
+      "alternativeNames": ["Context"],
+      "required": true,
+      "idPrefix": null
+    },
+    { "title": "Affects", "role": "scope", "required": true, "idPrefix": null },
     { "title": "Docs to Read", "required": true, "idPrefix": null },
     { "title": "Key Invariants", "required": true, "idPrefix": "INV" },
-    { "title": "Acceptance Criteria", "required": true, "idPrefix": "AC" },
+    {
+      "title": "Acceptance Criteria",
+      "role": "acceptance",
+      "required": true,
+      "idPrefix": "AC"
+    },
     { "title": "Test Requirement", "required": true, "idPrefix": "TR" },
     { "title": "Definition of Done", "required": true, "idPrefix": "DOD" },
     { "title": "Dependencies", "required": true, "idPrefix": null },

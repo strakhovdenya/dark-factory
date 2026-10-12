@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { loadCore, namesOf } = require('./issue-contract');
 
 const usage = () =>
   'usage: node verifier/affects-scope.js <issue.md> <files.txt> --out <scope.json>';
@@ -15,10 +16,18 @@ const HAS_EXTENSION = /\.[^./]+$/;
 // backticks (labels, option names) are not paths.
 const isPathLike = (token) => token.includes('/') || HAS_EXTENSION.test(token);
 
-// Collects the raw text of the "## Affects" section only, skipping any
-// fenced code (matching issue-lint.js's own fence handling) so a code block
-// inside the issue can never smuggle in a path.
-const extractAffectsSection = (markdown) => {
+const SCOPE_ROLE = 'scope';
+
+// The names of the scope section come from the issue contract (the section with
+// the `scope` role, main title and alternatives); this file holds no list of its own.
+const scopeSectionNames = (contract) =>
+  new Set(contract.sections.filter((s) => s.role === SCOPE_ROLE).flatMap(namesOf));
+
+// Collects the raw text of the scope section only, skipping any fenced code
+// (matching issue-lint.js's own fence handling) so a code block inside the
+// issue can never smuggle in a path.
+const extractAffectsSection = (markdown, contract) => {
+  const names = scopeSectionNames(contract);
   let inSection = false;
   let isFenced = false;
   const collected = [];
@@ -30,7 +39,7 @@ const extractAffectsSection = (markdown) => {
     if (isFenced) continue;
     const heading = HEADING.exec(line);
     if (heading) {
-      inSection = heading[1].trim().toLowerCase() === 'affects';
+      inSection = names.has(heading[1].trim());
       continue;
     }
     if (inSection) collected.push(line);
@@ -38,8 +47,8 @@ const extractAffectsSection = (markdown) => {
   return collected.join('\n');
 };
 
-const extractAffectsPatterns = (markdown) => {
-  const section = extractAffectsSection(markdown);
+const extractAffectsPatterns = (markdown, contract = loadCore()) => {
+  const section = extractAffectsSection(markdown, contract);
   const patterns = new Set();
   for (const match of section.matchAll(BACKTICK_TOKEN)) {
     const token = match[1].trim();
@@ -111,8 +120,8 @@ const changedPathsOf = (filesTxt) => {
 
 // Paths and patterns are data (INV-5): nothing here touches the filesystem
 // for them, only in-memory string/regex comparison.
-const computeScope = (issueMarkdown, filesTxt) => {
-  const patterns = extractAffectsPatterns(issueMarkdown).map(patternToRegex);
+const computeScope = (issueMarkdown, filesTxt, contract = loadCore()) => {
+  const patterns = extractAffectsPatterns(issueMarkdown, contract).map(patternToRegex);
   const outOfScope = changedPathsOf(filesTxt).filter(
     (changedPath) => !patterns.some((pattern) => pattern.test(changedPath)),
   );
