@@ -1,0 +1,93 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "criteria",
+    "invariants",
+    "test_tampering",
+    "risk_zones",
+    "out_of_scope_files"
+  ],
+  "properties": {
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "status", "summary", "refs"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "UNVERIFIABLE"] },
+          "summary": { "type": "string" },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "line", "quote", "kind"],
+              "properties": {
+                "path": { "type": "string" },
+                "line": { "type": "integer" },
+                "quote": { "type": "string" },
+                "kind": {
+                  "type": "string",
+                  "enum": ["impl", "test", "doc", "config", "ci"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "summary", "refs"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "N/A"] },
+          "summary": { "type": "string" },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "line", "quote", "kind"],
+              "properties": {
+                "path": { "type": "string" },
+                "line": { "type": "integer" },
+                "quote": { "type": "string" },
+                "kind": {
+                  "type": "string",
+                  "enum": ["impl", "test", "doc", "config", "ci"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "test_tampering": { "type": "array", "items": { "type": "string" } },
+    "risk_zones": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "auth",
+          "secrets",
+          "ci",
+          "migrations",
+          "fs_shell_sinks",
+          "state_machine",
+          "dependencies",
+          "adr_034_manual_note",
+          "none"
+        ]
+      }
+    },
+    "out_of_scope_files": { "type": "array", "items": { "type": "string" } }
+  }
+}
