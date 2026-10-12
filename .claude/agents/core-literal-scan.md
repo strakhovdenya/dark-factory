@@ -24,7 +24,7 @@ Allowed exceptions (do not report these as findings):
 - `jobflow` and `cards` as names of consumer projects in documentation such as `CLAUDE.md`: list them separately as "documentation mentions", not as findings.
 - `.git/` and `node_modules/`.
 
-When the Phase 1 literal test exists, it is the source of truth for the list; follow it and tell the main agent about any difference.
+The source of truth for the literal list and the exceptions is `.claude/scripts/core-literals.js` (checked in `npm test` by `.claude/scripts/core-literals.test.js`). Read it first and follow it; its search area is the package content (tracked files under the `files` directories of `package.json`, plus `package.json` and `README.md`). Tell the main agent about any difference between it and the list above.
 
 Return:
 1. Findings: one entry per hit as `file:line` followed by the QUOTED line. Group by literal.
