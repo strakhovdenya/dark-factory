@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { checkRelease, checkRepository } = require('./release-check');
+const { checkRelease, checkRepository, extractNotes } =require('./release-check');
 
 const pkg = (version) => JSON.stringify({ name: 'dark-factory', version });
 const CHANGELOG = '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-12\n\n- First release\n';
@@ -39,6 +39,13 @@ test('rejects changelog without bracketed version heading', () => {
     assert.equal(errors.length, 1, changelog);
     assert.ok(errors[0].includes('## [0.1.0]'), errors[0]);
   }
+});
+
+test('extracts only the section of the requested version as release notes', () => {
+  const changelog = '## [Unreleased]\n\nnext\n\n## [0.2.0] - d\n\n- two\n\n## [0.1.0] - d\r\n\r\n- one\r\n';
+  assert.equal(extractNotes(changelog, '0.2.0'), '- two');
+  assert.equal(extractNotes(changelog, '0.1.0'), '- one');
+  assert.equal(extractNotes(changelog, '0.3.0'), '');
 });
 
 test('rejects invalid package.json', () => {

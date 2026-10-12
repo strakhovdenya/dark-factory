@@ -35,16 +35,32 @@ function checkRelease(tag, packageJsonText, changelogText) {
   return errors;
 }
 
+/** Returns the body of the `## [version]` CHANGELOG section (up to the next `## ` heading). */
+function extractNotes(changelogText, version) {
+  const lines = String(changelogText).split(/\r?\n/);
+  const heading = new RegExp(`^## \\[${escapeRegExp(version)}\\](\\s|$)`);
+  const start = lines.findIndex((line) => heading.test(line));
+  if (start === -1) return '';
+  let end = lines.findIndex((line, i) => i > start && line.startsWith('## '));
+  if (end === -1) end = lines.length;
+  return lines.slice(start + 1, end).join('\n').trim();
+}
+
 function checkRepository(rootDir, tag) {
   const read = (name) => fs.readFileSync(path.join(rootDir, name), 'utf8');
   return checkRelease(tag, read('package.json'), read('CHANGELOG.md'));
 }
 
 if (require.main === module) {
-  const tag = process.argv[2];
+  const [tag, flag, notesFile] = process.argv.slice(2);
+  const root = path.resolve(__dirname, '..', '..');
   let errors;
   try {
-    errors = checkRepository(path.resolve(__dirname, '..', '..'), tag);
+    errors = checkRepository(root, tag);
+    if (errors.length === 0 && flag === '--notes-file') {
+      const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
+      fs.writeFileSync(notesFile, `${extractNotes(changelog, tag.slice(1))}\n`);
+    }
   } catch (error) {
     errors = [error.message];
   }
@@ -55,4 +71,4 @@ if (require.main === module) {
   console.log(`release-check: ${tag} ok`);
 }
 
-module.exports = { checkRelease, checkRepository };
+module.exports = { checkRelease, checkRepository, extractNotes };

@@ -13,10 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node .claude/scripts/release-check.js "$GITHUB_REF_NAME"
-      - run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+      # A release must come from a commit that already went through PR and CI on main.
+      - run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - run: node .claude/scripts/release-check.js "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+      - run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
