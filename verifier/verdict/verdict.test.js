@@ -380,7 +380,7 @@ test('risk_zones must be non-empty and come from the closed list', () => {
     false,
   );
   assert.strictEqual(
-    evaluateChecked(report({ risk_zones: ['ci', 'adr_034_manual_note'] }))
+    evaluateChecked(report({ risk_zones: ['ci', 'project_zone'] }))
       .passed,
     true,
   );

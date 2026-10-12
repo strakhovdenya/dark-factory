@@ -24,6 +24,10 @@
   "docOnlyPathPatterns": ["*.md", "docs/"],
   "protectedPaths": [".github/", "scripts/", "packages/billing/migrations/"],
   "labels": { "humanNeeded": "needs-human" },
+  "verifier": {
+    "goldenDir": "verification/golden",
+    "checks": ["spec-approval", "affects-scope", "computed-items", "test-tampering-scan", "references", "ci-checks", "allowed-model"]
+  },
   "skillRules": [
     {
       "path": "packages/storefront",

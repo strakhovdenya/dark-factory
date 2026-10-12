@@ -80,6 +80,7 @@ const buildMutatedTree = (repo, head, patchPath) => {
   }
 };
 
+/** @param {Record<string, string>} options */
 const applyMutation = ({ repo, base, head, patchFile, outDir }) => {
   assertSha(base, 'base');
   assertSha(head, 'head');

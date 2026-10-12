@@ -39,6 +39,15 @@ const REASON_CODES = Object.freeze({
 
 const REASON_CODE_SET = new Set(Object.values(REASON_CODES));
 
+// Codes of the verifier's own configuration (the project profile, its list
+// of checks, the trusted risk-zone config), kept apart from the codes of
+// judging a PR. A broken configuration fails the verdict; it is never
+// replaced by a default.
+const CONFIG_REASON_CODES = Object.freeze({
+  CONFIG_INVALID: 'config_invalid',
+  UNKNOWN_CHECK: 'unknown_check',
+});
+
 const ITEM_SOURCE_MODEL = 'model';
 const ITEM_SOURCE_COMPUTED = 'computed';
 
@@ -101,6 +110,7 @@ const buildResult = (outcome, computedItems = []) => ({
 module.exports = {
   REASON_CODES,
   REASON_CODE_SET,
+  CONFIG_REASON_CODES,
   ITEM_SOURCE_MODEL,
   ITEM_SOURCE_COMPUTED,
   buildResult,

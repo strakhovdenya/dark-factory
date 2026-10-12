@@ -215,6 +215,14 @@ const buildPrsOutput = (prs, aggregate) => ({
   runs: aggregate.runs,
 });
 
+/**
+ * @param {string[]} [argv]
+ * @param {{
+ *   exec?: (file: string, args: string[], options?: object) => string | Buffer,
+ *   stdout?: { write: (chunk: string) => unknown },
+ *   stderr?: { write: (chunk: string) => unknown },
+ * }} [io]
+ */
 const main = (
   argv = process.argv.slice(2),
   { exec = execFileSync, stdout = process.stdout, stderr = process.stderr } = {},

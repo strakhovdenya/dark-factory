@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { evaluate } = require('./verdict');
+const { mergeRiskZones, zoneNames } = require('../risk-zones');
 
 const ref = (overrides = {}) => ({
   path: 'pkg/api/x.ts',
@@ -52,6 +53,14 @@ const PROVENANCE = {
 
 const ALLOWED_MODELS = [PROVENANCE.model];
 
+// The base zones plus one zone of a fixture project.
+const PROJECT_RISK_ZONE = 'project_zone';
+const RISK_ZONES = zoneNames(
+  mergeRiskZones({
+    zones: [{ name: PROJECT_RISK_ZONE, description: 'fixture project zone' }],
+  }),
+);
+
 const evaluateChecked = (raw, options = {}) =>
   evaluate(raw, {
     refsProblems: [],
@@ -60,6 +69,7 @@ const evaluateChecked = (raw, options = {}) =>
     tamperingFindings: [],
     provenance: PROVENANCE,
     allowedModels: ALLOWED_MODELS,
+    riskZones: RISK_ZONES,
     ...options,
   });
 
@@ -69,6 +79,9 @@ const codeqlSuccess = {
   conclusion: 'success',
 };
 
+/**
+ * @param {{ checks?: object[], statuses?: object[], conclusion?: string, headSha?: string }} [options]
+ */
 const ciJson = ({
   checks = [codeqlSuccess],
   statuses = [],
@@ -221,6 +234,8 @@ module.exports = {
   scanResult,
   PROVENANCE,
   ALLOWED_MODELS,
+  PROJECT_RISK_ZONE,
+  RISK_ZONES,
   evaluateChecked,
   codeqlSuccess,
   ciJson,

@@ -40,6 +40,24 @@ const {
   reconcile,
 } = require('./verdict/second-run');
 const { buildResult } = require('./verdict/result');
+const { loadProfile } = require('../profile/load');
+const { baseRiskZones, loadRiskZones, zoneNames } = require('./risk-zones');
+
+// The verifier's configuration, read by parseConfigArgs: --project names the
+// project root whose profile picks the checks, --risk-zones the project's
+// trusted risk zone config.
+const CONFIG_FLAGS = new Set(['--project', '--risk-zones']);
+
+const parseConfigArgs = (argv) => {
+  const config = { project: null, riskZones: null };
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--project') config.project = argv[++index] ?? null;
+    else if (argv[index] === '--risk-zones') {
+      config.riskZones = argv[++index] ?? null;
+    }
+  }
+  return config;
+};
 
 const parseArgs = (argv) => {
   const options = {
@@ -114,18 +132,19 @@ const parseArgs = (argv) => {
       options.secondRefsProblems = argv[++index] ?? null;
     } else if (arg === '--result-out') {
       options.resultOut = argv[++index] ?? null;
-    } else if (options.file === null) options.file = arg;
+    } else if (CONFIG_FLAGS.has(arg)) index++;
+    else if (options.file === null) options.file = arg;
   }
   return options;
 };
 
 const USAGE =
   'usage:\n' +
-  '  acceptance-verdict.js --check-refs <verdict.json> --root <dir> ' +
+  '  verdict.js --check-refs <verdict.json> --root <dir> ' +
   '--out <refs-problems.json> [--issue <issue.md>] ' +
   '[--spec <spec-lint.json>] [--absence-out <absence.json>] ' +
   '[--notes-out <refs-notes.json>]\n' +
-  '  acceptance-verdict.js <verdict.json> --out <comment.md> ' +
+  '  verdict.js <verdict.json> --out <comment.md> ' +
   '[--refs-problems <refs-problems.json>] [--refs-notes <refs-notes.json>] ' +
   '[--ci <ci.json>] ' +
   '[--spec <spec-lint.json>] [--absence <absence.json>] ' +
@@ -139,8 +158,9 @@ const USAGE =
   '[--test-removal-approved] ' +
   '[--test-removal-ignored <actor> | --test-removal-ignored-unknown] ' +
   '[--second <verdict2.json> --second-refs-problems <refs-problems2.json>] ' +
-  '[--result-out <result.json>]\n' +
-  '  acceptance-verdict.js <verdict.json> --needs-second-run ' +
+  '[--result-out <result.json>] ' +
+  '[--project <project-root>] [--risk-zones <risk-zones.json>]\n' +
+  '  verdict.js <verdict.json> --needs-second-run ' +
   '[the verdict inputs above, without --out]';
 
 const readIssueCoverage = (report, issue) => {
@@ -175,7 +195,7 @@ const runCheckRefs = ({
   notesOut,
 }) => {
   const { raw } = readReport(file);
-  const { report } = raw === null ? { report: null } : parseReport(raw);
+  const { report } = raw === null ? { report: null } : parseReport(raw, { riskZones: null });
   const specItems = specItemsOf(readSpecResult(spec));
   const refsResult =
     report === null ? null : checkRefsWithNotes(report, root, specItems);
@@ -204,6 +224,29 @@ const runCheckRefs = ({
   return 0;
 };
 
+// Fail closed: without --project every registered check runs; with it the
+// profile picks them, and an unreadable or invalid profile fails the verdict.
+// Without --risk-zones the report may use only the base zones; a config that
+// was passed but is missing or invalid fails the verdict.
+const readConfig = ({ project, riskZones }) => {
+  const config = { configProblems: [] };
+  if (project !== null) {
+    try {
+      config.checks = loadProfile(project).verifier?.checks ?? [];
+    } catch (error) {
+      config.configProblems.push(`profile invalid: ${error.message}`);
+    }
+  }
+  try {
+    const zones =
+      riskZones === null ? baseRiskZones() : loadRiskZones(riskZones);
+    config.riskZones = zoneNames(zones);
+  } catch (error) {
+    config.configProblems.push(error.message);
+  }
+  return config;
+};
+
 // Reads every deterministic input once; the returned function judges one
 // model report (and its own refs-problems) against them, so a first and a
 // second run are evaluated on identical deterministic inputs.
@@ -219,6 +262,7 @@ const createReportEvaluator = ({
   provenance,
   allowedModels,
   testRemovalApproved,
+  config,
 }) => {
   const specResult = readSpecResult(spec);
   const skipReport = specResult !== undefined && isSpecInvalid(specResult);
@@ -241,6 +285,7 @@ const createReportEvaluator = ({
     approval: readApproval(approval),
     scope: readScopeResult(scope),
     computedItems,
+    ...readConfig(config),
   };
   const evaluateReport = (file, { refsProblems, refsNotesFile = null }) => {
     const { raw, problem } = skipReport
@@ -303,7 +348,7 @@ const runVerdict = (options) => {
 };
 
 const main = (argv) => {
-  const options = parseArgs(argv);
+  const options = { ...parseArgs(argv), config: parseConfigArgs(argv) };
   const { file, out, root, checkRefs: isCheckRefs } = options;
   const isNeedsSecondRun = options.needsSecondRun && !isCheckRefs;
   const hasOut = out !== null || isNeedsSecondRun;

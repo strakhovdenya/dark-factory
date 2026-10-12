@@ -10,7 +10,7 @@ Projects install a pinned release of the package and supply project-specific val
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `skills/`, `agents/`, `hooks/` | Package sources (the `files` field of `package.json`) | yes |
+| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/` | Package sources (the `files` field of `package.json`) | yes |
 | `.claude/` | Tooling for developing the factory only | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repository | no |

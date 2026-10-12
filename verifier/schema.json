@@ -75,17 +75,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": [
-          "auth",
-          "secrets",
-          "ci",
-          "migrations",
-          "fs_shell_sinks",
-          "state_machine",
-          "dependencies",
-          "adr_034_manual_note",
-          "none"
-        ]
+        "enum": ["auth", "secrets", "ci", "fs_shell_sinks", "dependencies", "none"]
       }
     },
     "out_of_scope_files": { "type": "array", "items": { "type": "string" } }

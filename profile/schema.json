@@ -85,9 +85,15 @@
           "minLength": 1
         },
         "goldenDir": {
-          "description": "Optional directory of reference cases (inputs with an expected verdict), relative to the project root.",
+          "description": "Directory of reference cases (inputs with an expected verdict), relative to the project root. The golden eval reads its cases only from here; without it the eval fails instead of using a default.",
           "type": "string",
           "minLength": 1
+        },
+        "checks": {
+          "description": "Names of the deterministic verifier checks that run for this project (core checks: spec-approval, affects-scope, computed-items, test-tampering-scan, references, ci-checks, allowed-model). Checks not listed stay off; none run by default. A name no registered check has fails the verdict.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },

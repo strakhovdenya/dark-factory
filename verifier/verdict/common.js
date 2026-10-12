@@ -15,18 +15,9 @@ const INVARIANT_STATUSES = new Set([
   STATUS_NOT_APPLICABLE,
 ]);
 
+// The allowed zone names come from risk-zones.js (core base list plus the
+// project's trusted zones); only 'none' has a rule of its own here.
 const RISK_NONE = 'none';
-const RISK_ZONES = new Set([
-  'auth',
-  'secrets',
-  'ci',
-  'migrations',
-  'fs_shell_sinks',
-  'state_machine',
-  'dependencies',
-  'adr_034_manual_note',
-  RISK_NONE,
-]);
 
 const REF_KINDS = new Set(['impl', 'test', 'doc', 'config', 'ci']);
 const BEHAVIOR_TYPE = 'behavior';
@@ -72,11 +63,15 @@ const isInvariant = (value) =>
 // A v2 report names its entries by issue ID; a legacy one leaves id empty.
 const labelOf = ({ id, text = '' }) => (id !== '' ? id : text);
 
+// Shape of risk_zones: a non-empty list where 'none' stands alone. Whether
+// each zone is known is checked against the merged list (unknownRiskZones).
 const isRiskZones = (value) =>
   isStringArray(value) &&
   value.length > 0 &&
-  value.every((zone) => RISK_ZONES.has(zone)) &&
   (!value.includes(RISK_NONE) || value.length === 1);
+
+const unknownRiskZones = (zones, allowed) =>
+  zones.filter((zone) => !allowed.includes(zone));
 
 const isSpecItem = (value) =>
   isObject(value) &&
@@ -122,7 +117,6 @@ module.exports = {
   CRITERION_STATUSES,
   INVARIANT_STATUSES,
   RISK_NONE,
-  RISK_ZONES,
   REF_KINDS,
   BEHAVIOR_TYPE,
   BEHAVIOR_REQUIRED_KINDS,
@@ -134,6 +128,7 @@ module.exports = {
   isInvariant,
   labelOf,
   isRiskZones,
+  unknownRiskZones,
   isSpecItem,
   isSpecShape,
   isV2Spec,

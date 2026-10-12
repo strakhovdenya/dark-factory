@@ -9,6 +9,8 @@ const { spawnSync } = require('node:child_process');
 
 const {
   parseArgs,
+  goldenDirOf,
+  GOLDEN_DIR_FIELD,
   readCases,
   readActualsRaw,
   parseActual,
@@ -17,6 +19,7 @@ const {
   render,
 } = require('./verifier-eval');
 const { REASON_CODES } = require('../verdict/result');
+const { createCoreRegistry } = require('../checks');
 
 const SCRIPT = path.join(__dirname, 'verifier-eval.js');
 
@@ -24,9 +27,11 @@ const MIN_PAIRS = 5;
 
 const { CRITERION_FAILED, CI_CHECK_FAILED, INVARIANT_FAILED } = REASON_CODES;
 
+/** @param {string} verdict @param {unknown} [reasons] */
 const actualJson = (verdict, reasons = []) =>
   JSON.stringify({ actual: verdict, reasons });
 
+/** @param {string} name @param {string} [code] @param {string | null} [id] */
 const failCase = (name, code = CRITERION_FAILED, id = 'AC-1') => ({
   name,
   expected: 'FAIL',
@@ -56,14 +61,27 @@ const mutationCase = (name, pairOf, mutationKind) => ({
 const caseJson = (expected, extra = {}) =>
   JSON.stringify({ expected, reason: 'x', ...extra });
 
+/** @param {string} [code] @param {string | null} [id] */
 const failCaseJson = (code = CRITERION_FAILED, id = 'AC-1') =>
   caseJson('FAIL', { expected_criterion_id: id, expected_reason_code: code });
 
 const passCaseJson = () =>
   caseJson('PASS', { expected_criterion_id: null, expected_reason_code: null });
 
+// A project root whose profile names its golden case directory.
+const writeProfile = (dir, verifier) => {
+  fs.mkdirSync(path.join(dir, '.factory'), { recursive: true });
+  const profile = {
+    branchTemplate: 'task/ISSUE-{issue}-{slug}',
+    apps: [{ name: 'main', path: '.' }],
+    ...(verifier === undefined ? {} : { verifier }),
+  };
+  fs.writeFileSync(path.join(dir, '.factory', 'profile.json'), JSON.stringify(profile));
+};
+
 const makeEvalDirs = (cases, results) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-eval-'));
+  writeProfile(dir, { goldenDir: 'golden' });
   const casesDir = path.join(dir, 'golden');
   const resultsDir = path.join(dir, 'results');
   fs.mkdirSync(resultsDir, { recursive: true });
@@ -78,10 +96,13 @@ const makeEvalDirs = (cases, results) => {
   return { dir, casesDir, resultsDir };
 };
 
+// casesDir is <project>/golden, as makeEvalDirs lays it out.
 const runCli = (casesDir, resultsDir) =>
-  spawnSync(process.execPath, [SCRIPT, casesDir, resultsDir], {
-    encoding: 'utf8',
-  });
+  spawnSync(
+    process.execPath,
+    [SCRIPT, '--project', path.dirname(casesDir), resultsDir],
+    { encoding: 'utf8' },
+  );
 
 test('parseActual accepts PASS and FAIL with reasons', () => {
   assert.deepStrictEqual(parseActual(actualJson('PASS')), {
@@ -380,19 +401,88 @@ test('readActualsRaw reads only files for known case names', () => {
   fs.rmSync(dir, { recursive: true });
 });
 
-test('parseArgs reads positional dirs and an optional --out', () => {
-  assert.deepStrictEqual(parseArgs(['cases', 'results']), {
-    casesDir: 'cases',
+test('parseArgs reads --project, the results dir and an optional --out', () => {
+  assert.deepStrictEqual(parseArgs(['--project', 'p', 'results']), {
+    project: 'p',
     resultsDir: 'results',
     out: null,
   });
-  assert.deepStrictEqual(parseArgs(['cases', 'results', '--out', 'x.md']), {
-    casesDir: 'cases',
-    resultsDir: 'results',
-    out: 'x.md',
-  });
-  assert.strictEqual(parseArgs(['cases']), null);
+  assert.deepStrictEqual(
+    parseArgs(['--project', 'p', 'results', '--out', 'x.md']),
+    { project: 'p', resultsDir: 'results', out: 'x.md' },
+  );
+  assert.strictEqual(parseArgs(['results']), null);
+  assert.strictEqual(parseArgs(['cases', 'results']), null);
   assert.strictEqual(parseArgs([]), null);
+});
+
+test('reads golden directory from profile', () => {
+  const { dir, casesDir, resultsDir } = makeEvalDirs(
+    { 434: failCaseJson(CI_CHECK_FAILED, null) },
+    { 434: actualJson('FAIL', [{ code: CI_CHECK_FAILED, id: null }]) },
+  );
+  // A second directory the profile does not name is never read.
+  fs.mkdirSync(path.join(dir, 'other', '999'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'other', '999', 'case.json'), passCaseJson());
+  assert.strictEqual(goldenDirOf(dir), casesDir);
+  const run = runCli(casesDir, resultsDir);
+  assert.strictEqual(run.status, 0, run.stderr);
+  assert.ok(run.stdout.includes('434 | FAIL | FAIL | ci_check_failed'));
+  assert.ok(!run.stdout.includes('999'));
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('fails when profile has no golden directory', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-eval-'));
+  writeProfile(dir, {});
+  // A directory at the conventional place must not be picked up as a default.
+  fs.mkdirSync(path.join(dir, '.github', 'verifier', 'golden', '434'), {
+    recursive: true,
+  });
+  assert.strictEqual(GOLDEN_DIR_FIELD, 'verifier.goldenDir');
+  assert.throws(() => goldenDirOf(dir), /verifier\.goldenDir/);
+  const results = path.join(dir, 'results');
+  fs.mkdirSync(results);
+  const run = spawnSync(
+    process.execPath,
+    [SCRIPT, '--project', dir, results],
+    { encoding: 'utf8' },
+  );
+  assert.strictEqual(run.status, 2);
+  assert.ok(run.stderr.includes('verifier.goldenDir'), run.stderr);
+  assert.strictEqual(run.stdout, '');
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('fails when the profile is invalid', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-eval-'));
+  fs.mkdirSync(path.join(dir, '.factory'));
+  fs.writeFileSync(path.join(dir, '.factory', 'profile.json'), '{}');
+  const run = spawnSync(process.execPath, [SCRIPT, '--project', dir, dir], {
+    encoding: 'utf8',
+  });
+  assert.strictEqual(run.status, 2);
+  assert.ok(run.stderr.includes('branchTemplate'), run.stderr);
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('accepts reason codes a registered check declared', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-eval-'));
+  fs.mkdirSync(path.join(dir, 'x'));
+  fs.writeFileSync(
+    path.join(dir, 'x', 'case.json'),
+    failCaseJson('extra_check_failed', null),
+  );
+  assert.strictEqual(readCases(dir)[0].isValid, false);
+  const registry = createCoreRegistry();
+  registry.register({
+    name: 'extra-check',
+    stage: 'report',
+    codes: ['extra_check_failed'],
+    run: () => [],
+  });
+  assert.strictEqual(readCases(dir, registry.reasonCodes())[0].isValid, true);
+  fs.rmSync(dir, { recursive: true });
 });
 
 test('CLI reports usage and exits 2 on missing args', () => {
@@ -402,14 +492,14 @@ test('CLI reports usage and exits 2 on missing args', () => {
 });
 
 test('CLI evaluates a cases/results directory pair end to end', () => {
-  const { dir, casesDir, resultsDir } = makeEvalDirs(
+  const { dir, resultsDir } = makeEvalDirs(
     { 434: failCaseJson(CI_CHECK_FAILED, null) },
     { 434: actualJson('FAIL', [{ code: CI_CHECK_FAILED, id: null }]) },
   );
   const out = path.join(dir, 'summary.md');
   const run = spawnSync(
     process.execPath,
-    [SCRIPT, casesDir, resultsDir, '--out', out],
+    [SCRIPT, '--project', dir, resultsDir, '--out', out],
     { encoding: 'utf8' },
   );
   assert.strictEqual(run.status, 0);

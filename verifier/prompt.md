@@ -54,8 +54,8 @@ Procedure:
    still running, or not conclusively successful, mark the entry UNVERIFIABLE (or FAIL if the
    check concluded with a failure). Do not infer a green run from the diff.
 4. Cross-layer entries: when a criterion is about a field, type, payload, enum value or endpoint
-   shared between layers (for example a type in apps/web and its source in apps/api), you must
-   quote BOTH sides as separate references and compare the names and shapes character by
+   shared between layers (for example a type in the frontend and its source in the backend), you
+   must quote BOTH sides as separate references and compare the names and shapes character by
    character. A mismatch (renamed field, different casing, different optionality, different enum
    value) is a FAIL that names both spellings in "summary". One side alone is never enough.
 5. References (in "criteria" and in "invariants" alike). Every reference is
@@ -93,16 +93,7 @@ Procedure:
    disabled lint/type/CI checks, edits to test fixtures that make a failing case pass.
    Always output the field; use an empty array if there is none.
 7. risk_zones: always output at least one value from this closed list, and only from it:
-   - auth: authentication, API keys, authorization, CORS
-   - secrets: secrets, tokens, .env handling
-   - ci: .github/, workflows, CODEOWNERS, verifier files, hooks, build/CI scripts
-   - migrations: Prisma schema or migrations
-   - fs_shell_sinks: filesystem paths, child_process, Puppeteer, fetch/URL sinks
-   - state_machine: workspace status transitions, review gates, PromptRun state
-   - dependencies: package.json / lockfile / Docker base image changes
-   - adr_034_manual_note: manual note forced claims (manual_note_forced_claims, user_forced,
-     "user-forced, unverified"), anything that surfaces or bypasses them
-   - none: none of the above; use it alone, never together with other values
+{{RISK_ZONES}}
    List every zone the diff touches. Facts only.
 8. out_of_scope_files: changed files that no entry and no path in the issue's Affects section
    explains. Always output the field; use an empty array if there is none. For an issue whose

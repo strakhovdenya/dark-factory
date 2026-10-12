@@ -111,6 +111,17 @@ const renderSecondRun = (secondRun) => {
   ];
 };
 
+/**
+ * @param {any} result an evaluate() result
+ * @param {{
+ *   problem?: string | null,
+ *   manualVerifiedIgnoredBy?: string | null,
+ *   testRemovalIgnoredBy?: string | null,
+ *   verdict?: string,
+ *   diverged?: string[],
+ *   secondRun?: object | null,
+ * }} options
+ */
 const renderComment = (
   {
     passed,

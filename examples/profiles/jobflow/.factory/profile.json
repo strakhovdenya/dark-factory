@@ -37,7 +37,10 @@
     "apps/api/knowledge-sources/"
   ],
   "labels": { "humanNeeded": "ralph-needs-prompt-change" },
-  "verifier": { "goldenDir": ".github/verifier/golden" },
+  "verifier": {
+    "goldenDir": ".github/verifier/golden",
+    "checks": ["spec-approval", "affects-scope", "computed-items", "test-tampering-scan", "references", "ci-checks", "allowed-model"]
+  },
   "skillRules": [
     {
       "path": "apps/api",

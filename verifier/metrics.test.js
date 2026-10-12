@@ -234,7 +234,7 @@ test('prints metrics json for a pr', () => {
 });
 
 test('exits 1 with gh error message when gh fails', () => {
-  const error = new Error('Command failed');
+  const error = Object.assign(new Error('Command failed'), { stderr: '' });
   error.stderr = 'gh: authentication required\n';
   const exec = execFor([{ match: 'issues/123/comments', error }]);
   const stdout = makeSink();
@@ -326,7 +326,7 @@ test('exits 1 naming the failing pr when gh fails during --prs', () => {
     verdict: 'PASS',
     criteria: [['AC-1 a', 'PASS', 'ok', 'f.js:1']],
   });
-  const error = new Error('Command failed');
+  const error = Object.assign(new Error('Command failed'), { stderr: '' });
   error.stderr = 'gh: pull request not found\n';
   const exec = execFor([
     {

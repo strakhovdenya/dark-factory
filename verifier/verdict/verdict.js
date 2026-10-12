@@ -10,132 +10,22 @@ const {
 } = require('./common');
 const { parseReport } = require('./inputs');
 const { notesByKey } = require('./refs');
-const { REASON_CODES: CODE } = require('./result');
+const { REASON_CODES: CODE, CONFIG_REASON_CODES } = require('./result');
+const {
+  SOURCE_MODEL,
+  SOURCE_DETERMINISTIC,
+  modelReason,
+  deterministicReason,
+} = require('./reason');
+const { coreRegistry } = require('../checks');
+const { baseRiskZones, zoneNames } = require('../risk-zones');
 
 const SPEC_NOT_CHECKED = 'spec was not checked';
-const SCOPE_NOT_CHECKED = 'scope was not checked';
-const APPROVAL_NOT_CHECKED = 'spec approval was not checked';
-const TAMPERING_SCAN_NOT_RUN = 'tampering scan was not run';
 const PROVENANCE_MISSING = 'provenance missing';
-const ALLOWED_MODELS_NOT_CHECKED = 'allowed models were not checked';
-const modelNotAllowed = (model) =>
-  `VERIFIER_MODEL is not in allowed-models.json: ${model}`;
-const SPEC_NOT_APPROVED = 'spec not approved';
-const SPEC_CHANGED = 'spec changed after approval';
-const LEGACY_NOT_APPROVED = 'Spec approval: not approved (legacy)';
 
-// Where a FAIL reason comes from: the model's
-// own judgement, or a check computed by code. second-run.js decides on this
-// source, never on the reason text.
-const SOURCE_MODEL = 'model';
-const SOURCE_DETERMINISTIC = 'deterministic';
+const BASE_ZONE_NAMES = zoneNames(baseRiskZones());
 
-// Every reason carries a code from result.js's closed list and the issue ID
-// it is about (null when it is about no single item). Both are set here,
-// where the reason is created, never parsed back out of the text.
-const createReason = (source) => (code, text, id = null) => ({
-  text,
-  source,
-  code,
-  id,
-});
-const modelReason = createReason(SOURCE_MODEL);
-const deterministicReason = createReason(SOURCE_DETERMINISTIC);
 const textsOf = (reasons) => reasons.map((reason) => reason.text);
-
-const describeLoss = ({ path: file, lost }) =>
-  `${file}: ${lost} assertion line(s) removed without a matching added line`;
-
-// Applies only to v2 issues: a legacy issue keeps relying on the model's own
-// out_of_scope_files, handled in collectFailures.
-const checkScope = (scopeResult, specFormat) => {
-  if (specFormat !== 'v2') return [];
-  if (scopeResult === undefined || scopeResult === null) {
-    return [deterministicReason(CODE.SCOPE_NOT_CHECKED, SCOPE_NOT_CHECKED)];
-  }
-  return scopeResult.out_of_scope.map((file) =>
-    deterministicReason(
-      CODE.OUT_OF_SCOPE_FILE,
-      `out of scope file (computed): ${file}`,
-    ),
-  );
-};
-
-// A changed spec fails for every format; a missing approval fails unless the
-// issue is known to be legacy, where it is only noted in the comment.
-const checkApproval = (approval, specFormat) => {
-  const result = (failures, note = null) => ({ failures, note });
-  const failWith = (code, text) => result([deterministicReason(code, text)]);
-  if (approval === undefined) return result([]);
-  if (approval === null) {
-    return failWith(CODE.APPROVAL_NOT_CHECKED, APPROVAL_NOT_CHECKED);
-  }
-  if (approval.approved_hash === null) {
-    if (specFormat === 'legacy') return result([], LEGACY_NOT_APPROVED);
-    return failWith(CODE.SPEC_NOT_APPROVED, SPEC_NOT_APPROVED);
-  }
-  if (approval.approved_hash !== approval.current_hash) {
-    return failWith(CODE.SPEC_CHANGED, SPEC_CHANGED);
-  }
-  return result([]);
-};
-
-const scanReasons = ({
-  tamperingFindings,
-  assertionLosses,
-  testRemovalApproved,
-}) => {
-  if (tamperingFindings === null) {
-    return [
-      deterministicReason(CODE.TAMPERING_SCAN_NOT_RUN, TAMPERING_SCAN_NOT_RUN),
-    ];
-  }
-  const reasons = tamperingFindings.map((item) =>
-    deterministicReason(
-      CODE.TAMPERING_SCAN_FINDING,
-      `test tampering (scan): ${item}`,
-    ),
-  );
-  // The owner's approval excuses only assertion losses, never the other
-  // scanner findings, the model's test_tampering or UNVERIFIABLE.
-  if (!testRemovalApproved) {
-    for (const loss of assertionLosses) {
-      const text = `test tampering (scan): ${describeLoss(loss)}`;
-      reasons.push(deterministicReason(CODE.ASSERTION_LOSS, text));
-    }
-  }
-  return reasons;
-};
-
-const ciReasons = (ciFailures) => {
-  if (ciFailures === null) {
-    return [
-      deterministicReason(CODE.CI_NOT_CHECKED, 'CI results were not checked'),
-    ];
-  }
-  return ciFailures.map((text) =>
-    deterministicReason(CODE.CI_CHECK_FAILED, text),
-  );
-};
-
-// VERIFIER_MODEL is only checked against provenanceModel when provenance
-// itself was read successfully; a missing provenance already fails via
-// PROVENANCE_MISSING and this would only duplicate that reason.
-const modelAllowedReasons = (allowedModels, provenanceModel) => {
-  if (allowedModels === null) {
-    return [
-      deterministicReason(
-        CODE.ALLOWED_MODELS_NOT_CHECKED,
-        ALLOWED_MODELS_NOT_CHECKED,
-      ),
-    ];
-  }
-  const isNotAllowed =
-    provenanceModel !== null && !allowedModels.includes(provenanceModel);
-  if (!isNotAllowed) return [];
-  const text = modelNotAllowed(provenanceModel);
-  return [deterministicReason(CODE.MODEL_NOT_ALLOWED, text)];
-};
 
 const criterionReasons = (criterion, manualVerified) => {
   const reasons = [];
@@ -178,29 +68,9 @@ const invariantReasons = ({ id, status, refs }) => {
   return reasons;
 };
 
-const refsReasons = (refsProblems) => {
-  if (refsProblems === null) {
-    return [modelReason(CODE.REFS_NOT_CHECKED, 'references were not checked')];
-  }
-  return refsProblems.map((item) =>
-    modelReason(CODE.BAD_REFERENCE, `bad reference: ${item}`),
-  );
-};
-
-const collectFailures = (
-  report,
-  {
-    manualVerified,
-    refsProblems,
-    ciFailures,
-    specFormat,
-    tamperingFindings,
-    assertionLosses,
-    testRemovalApproved,
-    allowedModels,
-    provenanceModel,
-  },
-) => {
+// The model's own judgement in the report. Deterministic checks are not
+// called from here: they run through the registry (runStage).
+const collectFailures = (report, { manualVerified, specFormat }) => {
   const reasons = [];
   if (report.criteria.length === 0) {
     reasons.push(modelReason(CODE.NO_CRITERIA, 'no criteria were checked'));
@@ -215,52 +85,61 @@ const collectFailures = (
     const text = `test tampering: ${item}`;
     reasons.push(modelReason(CODE.MODEL_TEST_TAMPERING, text));
   }
-  reasons.push(
-    ...scanReasons({ tamperingFindings, assertionLosses, testRemovalApproved }),
-  );
+  // A v2 issue's scope is computed by the affects-scope check; a legacy
+  // issue keeps relying on the model's list.
   if (specFormat !== 'v2') {
     for (const file of report.out_of_scope_files) {
       const text = `out of scope file: ${file}`;
       reasons.push(modelReason(CODE.MODEL_OUT_OF_SCOPE_FILE, text));
     }
   }
-  reasons.push(...refsReasons(refsProblems));
-  reasons.push(...ciReasons(ciFailures));
-  reasons.push(...modelAllowedReasons(allowedModels, provenanceModel));
   return reasons;
 };
 
-// The deterministic inputs that do not depend on the model report; also
-// checked when there is no report, so a missing report next to a red check
-// is never mistaken for a model-only FAIL.
-const inputReasons = (options) => [
-  ...options.computedItems
-    .filter(({ status }) => status === STATUS_FAIL)
-    .map(({ id }) =>
-      deterministicReason(
-        CODE.COMPUTED_ITEM_FAILED,
-        `criterion failed: ${id}`,
-        id,
-      ),
+// Picks the checks the profile enables. An unknown name fails the verdict:
+// a check the project relies on must never be skipped silently.
+const selectChecks = (registry, enabled) => {
+  const { checks, unknown } = registry.select(enabled);
+  const reasons = unknown.map((name) =>
+    deterministicReason(
+      CONFIG_REASON_CODES.UNKNOWN_CHECK,
+      `unknown check in profile: ${name}`,
     ),
-  ...scanReasons(options),
-  ...ciReasons(options.ciFailures),
-  ...modelAllowedReasons(options.allowedModels, options.provenanceModel),
-];
-
-// Merges deterministically computed ci/absence entries into the model's own
-// criteria: a computed id always wins over whatever the model reported for
-// it (AC-8 — a stray model entry for that id is discarded, not compared).
-const mergeComputed = (report, computedItems) => {
-  if (computedItems.length === 0) return report;
-  const computedIds = new Set(computedItems.map((entry) => entry.id));
-  const criteria = [
-    ...report.criteria.filter((entry) => !computedIds.has(entry.id)),
-    ...computedItems,
-  ];
-  return { ...report, criteria };
+  );
+  return { checks, reasons };
 };
 
+const runStage = (registry, checks, stage, context) =>
+  checks
+    .filter((check) => check.stage === stage)
+    .flatMap((check) => registry.runCheck(check, context));
+
+const prepareReport = (checks, report, context) =>
+  checks.reduce(
+    (current, check) =>
+      check.prepareReport === undefined
+        ? current
+        : check.prepareReport(current, context),
+    report,
+  );
+
+const noteOf = (checks, context) => {
+  for (const check of checks) {
+    const note = check.note === undefined ? null : check.note(context);
+    if (note !== null) return note;
+  }
+  return null;
+};
+
+// registry: the checks that exist (core checks by default); checks: the
+// names the project profile enables (every registered check by default, the
+// strictest choice); configProblems: problems found in the profile or a
+// trusted config, each a FAIL; riskZones: the merged zone names the report
+// may use (core base zones by default).
+/**
+ * @param {string | null} raw the model report text
+ * @param {Record<string, any>} [options]
+ */
 const evaluate = (
   raw,
   {
@@ -278,6 +157,10 @@ const evaluate = (
     approval,
     scope,
     computedItems = [],
+    registry = coreRegistry,
+    checks: enabled = registry.names(),
+    configProblems = [],
+    riskZones = BASE_ZONE_NAMES,
   } = {},
 ) => {
   const assertions = {
@@ -288,17 +171,40 @@ const evaluate = (
   const specFormat =
     spec !== undefined && spec !== null ? spec.format : undefined;
   const specItems = specItemsOf(spec);
-  const approvalCheck = checkApproval(approval, specFormat);
-  const approvalNote = approvalCheck.note;
+  const selection = selectChecks(registry, enabled);
+  const context = {
+    report: null,
+    manualVerified,
+    specFormat,
+    specItems,
+    approval,
+    scope,
+    refsProblems,
+    ciFailures,
+    tamperingFindings,
+    assertionLosses,
+    testRemovalApproved,
+    allowedModels,
+    provenanceModel: provenance === null ? null : provenance.model,
+    computedItems,
+  };
+  const approvalNote = noteOf(selection.checks, context);
   // Checked before any report-parsing branch (including the earliest
-  // isSpecInvalid return) so a missing/malformed provenance.json is never
-  // silently skipped regardless of which path the verdict takes (INV-6).
+  // isSpecInvalid return) so a missing/malformed provenance.json, a broken
+  // configuration or an unknown check is never silently skipped regardless
+  // of which path the verdict takes.
   const provenanceFailures =
     provenance === null
       ? [deterministicReason(CODE.PROVENANCE_MISSING, PROVENANCE_MISSING)]
       : [];
+  const configFailures = [
+    ...configProblems.map((problem) =>
+      deterministicReason(CONFIG_REASON_CODES.CONFIG_INVALID, problem),
+    ),
+    ...selection.reasons,
+  ];
   const fail = (reasons) => {
-    const all = [...provenanceFailures, ...reasons];
+    const all = [...provenanceFailures, ...configFailures, ...reasons];
     return {
       passed: false,
       report: null,
@@ -324,42 +230,27 @@ const evaluate = (
       : [];
   const preFailures = [
     ...specNotChecked,
-    ...approvalCheck.failures,
-    ...checkScope(scope, specFormat),
+    ...runStage(registry, selection.checks, 'spec', context),
   ];
-  const provenanceModel = provenance === null ? null : provenance.model;
+  // Without a report the report-stage checks still run, so a missing report
+  // next to a red check is never mistaken for a model-only FAIL.
   const failWithoutReport = (text) =>
     fail([
       ...preFailures,
       modelReason(CODE.REPORT_MISSING, text),
-      ...inputReasons({
-        computedItems,
-        tamperingFindings,
-        assertionLosses,
-        testRemovalApproved,
-        ciFailures,
-        allowedModels,
-        provenanceModel,
-      }),
+      ...runStage(registry, selection.checks, 'report', context),
     ]);
   if (raw === null) return failWithoutReport('no report');
-  const { report: parsed, problem } = parseReport(raw);
+  const { report: parsed, problem } = parseReport(raw, { riskZones });
   if (parsed === null) return failWithoutReport(problem);
-  const report = mergeComputed(parsed, computedItems);
+  const report = prepareReport(selection.checks, parsed, context);
+  const reportContext = { ...context, report };
   const reasons = [
     ...provenanceFailures,
+    ...configFailures,
     ...preFailures,
-    ...collectFailures(report, {
-      manualVerified,
-      refsProblems,
-      ciFailures,
-      tamperingFindings,
-      assertionLosses,
-      testRemovalApproved,
-      specFormat,
-      allowedModels,
-      provenanceModel,
-    }),
+    ...collectFailures(report, { manualVerified, specFormat }),
+    ...runStage(registry, selection.checks, 'report', reportContext),
   ];
   return {
     passed: reasons.length === 0,
@@ -379,17 +270,7 @@ module.exports = {
   SOURCE_MODEL,
   SOURCE_DETERMINISTIC,
   SPEC_NOT_CHECKED,
-  SCOPE_NOT_CHECKED,
-  APPROVAL_NOT_CHECKED,
-  TAMPERING_SCAN_NOT_RUN,
   PROVENANCE_MISSING,
-  ALLOWED_MODELS_NOT_CHECKED,
-  SPEC_NOT_APPROVED,
-  SPEC_CHANGED,
-  LEGACY_NOT_APPROVED,
-  checkScope,
-  checkApproval,
   collectFailures,
-  mergeComputed,
   evaluate,
 };

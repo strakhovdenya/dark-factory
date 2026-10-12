@@ -3,7 +3,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { REASON_CODE_SET } = require('../verdict/result');
+const { loadProfile } = require('../../profile/load');
+const { coreRegistry } = require('../checks');
+
+// The profile field that names the golden case directory. There is no
+// default: a project without it has no golden set to evaluate.
+const GOLDEN_DIR_FIELD = 'verifier.goldenDir';
 
 const VERDICTS = new Set(['PASS', 'FAIL']);
 const VERDICT_NEEDS_HUMAN = 'NEEDS_HUMAN';
@@ -21,21 +26,22 @@ const OUTCOME = Object.freeze({
 });
 
 const usage = () =>
-  'usage: node verifier/eval/verifier-eval.js <cases-dir> <results-dir> [--out <file>]';
+  'usage: node verifier/eval/verifier-eval.js --project <project-root> <results-dir> [--out <file>]';
 
 const isNonEmptyString = (value) => typeof value === 'string' && value !== '';
 
 // A PASS case checks no reason, so both fields must be null. A FAIL case
-// names the reason code (from the closed list the verifier exports) and the
-// issue item it is about, or null for a rule without an ID (INV-3, INV-4).
-const isValidExpectation = (parsed) => {
+// names the reason code (from the closed list of the check registry: core
+// codes plus the codes checks declared) and the issue item it is about, or
+// null for a rule without an ID.
+const isValidExpectation = (parsed, reasonCodes) => {
   const {
     expected,
     expected_criterion_id: id,
     expected_reason_code: code,
   } = parsed;
   if (expected === 'PASS') return id === null && code === null;
-  return REASON_CODE_SET.has(code) && (id === null || isNonEmptyString(id));
+  return reasonCodes.has(code) && (id === null || isNonEmptyString(id));
 };
 
 const readHasPatch = (casesDir, name) => {
@@ -61,7 +67,7 @@ const isValidMutation = ({ expected, pairOf, mutationKind, hasPatch }) =>
 // skipped rather than crashing the whole eval run. A case whose reason
 // expectation is missing or invalid is kept but marked, so it is counted as
 // a run failure instead of being checked by verdict alone.
-const readCases = (casesDir) => {
+const readCases = (casesDir, reasonCodes = coreRegistry.reasonCodes()) => {
   let entries;
   try {
     entries = fs.readdirSync(casesDir, { withFileTypes: true });
@@ -92,7 +98,7 @@ const readCases = (casesDir) => {
       ? parsed.mutation_kind
       : null;
     const hasPatch = readHasPatch(casesDir, name);
-    const isExpectationValid = isValidExpectation(parsed);
+    const isExpectationValid = isValidExpectation(parsed, reasonCodes);
     const isValid =
       isExpectationValid &&
       isValidMutation({
@@ -375,27 +381,39 @@ const render = ({
 };
 
 const parseArgs = (argv) => {
-  let casesDir = null;
+  let project = null;
   let resultsDir = null;
   let out = null;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--out') {
+    if (arg === '--out' || arg === '--project') {
       const value = argv[index + 1];
       if (!value) return null;
-      out = value;
+      if (arg === '--out') out = value;
+      else project = value;
       index += 1;
-    } else if (!arg.startsWith('--') && casesDir === null) {
-      casesDir = arg;
     } else if (!arg.startsWith('--') && resultsDir === null) {
       resultsDir = arg;
     } else {
       return null;
     }
   }
-  return casesDir !== null && resultsDir !== null
-    ? { casesDir, resultsDir, out }
+  return project !== null && resultsDir !== null
+    ? { project, resultsDir, out }
     : null;
+};
+
+// The golden case directory comes only from the project profile, resolved
+// against the project root. Throws when the profile is invalid or does not
+// name the directory.
+const goldenDirOf = (projectRoot) => {
+  const goldenDir = loadProfile(projectRoot).verifier?.goldenDir;
+  if (goldenDir === undefined) {
+    throw new Error(
+      `profile field ${GOLDEN_DIR_FIELD} is not set: the project has no golden case directory`,
+    );
+  }
+  return path.resolve(projectRoot, goldenDir);
 };
 
 const main = (argv = process.argv.slice(2)) => {
@@ -404,7 +422,15 @@ const main = (argv = process.argv.slice(2)) => {
     process.stderr.write(`${usage()}\n`);
     return 2;
   }
-  const cases = readCases(args.casesDir);
+  let casesDir;
+  try {
+    casesDir = goldenDirOf(args.project);
+  } catch (error) {
+    process.stderr.write(`${error.message}
+`);
+    return 2;
+  }
+  const cases = readCases(casesDir);
   const actualsRaw = readActualsRaw(args.resultsDir, cases);
   const summary = summarize(cases, actualsRaw);
   const rendered = render(summary);
@@ -422,7 +448,9 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = {
   usage,
+  GOLDEN_DIR_FIELD,
   parseArgs,
+  goldenDirOf,
   main,
   readCases,
   readActualsRaw,

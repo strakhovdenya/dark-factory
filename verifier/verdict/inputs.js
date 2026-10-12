@@ -7,6 +7,7 @@ const {
   isCriterion,
   isInvariant,
   isRiskZones,
+  unknownRiskZones,
   isSpecShape,
 } = require('./common');
 
@@ -144,7 +145,10 @@ const readScopeResult = (file) => {
   }
 };
 
-const parseReport = (raw) => {
+// riskZones is the merged list of zone names (risk-zones.js) the report's
+// risk_zones must come from; null skips only that membership check, for a
+// caller that does not judge the zones (--check-refs).
+const parseReport = (raw, { riskZones }) => {
   let data;
   try {
     data = JSON.parse(raw);
@@ -162,6 +166,15 @@ const parseReport = (raw) => {
     isRiskZones(data.risk_zones) &&
     isStringArray(data.out_of_scope_files);
   if (!isValid) return { report: null, problem: 'report violates schema' };
+  const unknown =
+    riskZones === null ? [] : unknownRiskZones(data.risk_zones, riskZones);
+  if (unknown.length > 0) {
+    const names = unknown.map((zone) => JSON.stringify(zone)).join(', ');
+    return {
+      report: null,
+      problem: `report violates schema: unknown risk zone ${names}`,
+    };
+  }
   return { report: data, problem: null };
 };
 

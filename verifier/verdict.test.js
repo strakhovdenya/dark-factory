@@ -341,6 +341,7 @@ const FAILED_BUILD_CI = ciJson({
   ],
 });
 
+/** @param {{ ci?: string }} [options] */
 const runNeedsSecondRun = ({ ci } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verdict-'));
   const write = writeInto(dir);
@@ -1040,4 +1041,195 @@ test('requiring the entry does not run the CLI', () => {
   assert.strictEqual(run.status, 0);
   assert.strictEqual(run.stdout, '');
   assert.strictEqual(run.stderr, '');
+});
+
+// The profile and trusted configs a project passes to the verifier. The
+// monorepo fixture enables every core check, as a project that keeps the
+// verdicts of the verifier before checks became modules.
+const FIXTURE_PROFILES = path.join(ROOT, 'test', 'fixtures', 'profiles');
+const ALL_CHECKS_PROJECT = path.join(FIXTURE_PROFILES, 'monorepo');
+const PROJECT_ZONES = {
+  zones: [{ name: 'project_zone', description: 'fixture project zone' }],
+};
+
+// Runs the verdict CLI on one report and green v2 inputs (the inputs of the
+// transferred second-run tests); returns stdout, the comment and result.json.
+const runVerdictCli = ({
+  reportText,
+  refsProblems = [],
+  ci = ciJson(),
+  outOfScope = [],
+  config = [],
+}) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verdict-'));
+  const write = writeInto(dir);
+  const args = secondRunArgs(dir, { ci });
+  const scopeIndex = args.indexOf('--scope') + 1;
+  args[scopeIndex] = write('scope.json', JSON.stringify({ out_of_scope: outOfScope }));
+  const out = path.join(dir, 'comment.md');
+  const resultOut = path.join(dir, 'result.json');
+  const run = spawnSync(
+    process.execPath,
+    [
+      SCRIPT, write('verdict.json', reportText), '--out', out,
+      '--refs-problems', write('refs-problems.json', JSON.stringify(refsProblems)),
+      '--result-out', resultOut,
+      ...args,
+      ...config.map((arg) =>
+        typeof arg === 'string' ? arg : write(arg.name, arg.content),
+      ),
+    ],
+    { encoding: 'utf8' },
+  );
+  const output = {
+    status: run.status,
+    stderr: run.stderr,
+    verdict: run.stdout.trim(),
+    comment: fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : null,
+    result: fs.existsSync(resultOut)
+      ? JSON.parse(fs.readFileSync(resultOut, 'utf8'))
+      : null,
+  };
+  fs.rmSync(dir, { recursive: true });
+  return output;
+};
+
+const projectConfig = (zones = PROJECT_ZONES) => [
+  '--project', ALL_CHECKS_PROJECT,
+  '--risk-zones', { name: 'risk-zones.json', content: JSON.stringify(zones) },
+];
+
+const TRANSFERRED_RUNS = [
+  { name: 'green inputs', expected: 'PASS', inputs: { reportText: runReport() } },
+  {
+    name: 'failed build',
+    expected: 'FAIL',
+    inputs: { reportText: runReport(), ci: FAILED_BUILD_CI },
+  },
+  {
+    name: 'model FAIL',
+    expected: 'FAIL',
+    inputs: { reportText: runReport({ statuses: { 'AC-1': 'FAIL' } }) },
+  },
+  {
+    name: 'bad reference',
+    expected: 'FAIL',
+    inputs: { reportText: runReport(), refsProblems: [BAD_REF_PROBLEM] },
+  },
+  {
+    name: 'file outside Affects',
+    expected: 'FAIL',
+    inputs: { reportText: runReport(), outOfScope: ['docs/x.md'] },
+  },
+];
+
+test('keeps reference verdicts for transferred inputs', () => {
+  for (const { name, expected, inputs } of TRANSFERRED_RUNS) {
+    const plain = runVerdictCli(inputs);
+    const viaProfile = runVerdictCli({ ...inputs, config: projectConfig() });
+    assert.strictEqual(plain.status, 0, `${name}: ${plain.stderr}`);
+    assert.strictEqual(plain.verdict, expected, name);
+    assert.strictEqual(viaProfile.verdict, expected, name);
+    assert.strictEqual(viaProfile.comment, plain.comment, name);
+    assert.deepStrictEqual(viaProfile.result, plain.result, name);
+  }
+});
+
+test('keeps reference failure reasons for transferred inputs', () => {
+  const { verdict, result, comment } = runVerdictCli({
+    reportText: runReport(),
+    outOfScope: ['docs/x.md'],
+    config: projectConfig(),
+  });
+  assert.strictEqual(verdict, 'FAIL');
+  assert.deepStrictEqual(result.reasons, [
+    {
+      code: 'out_of_scope_file',
+      id: null,
+      source: 'deterministic',
+      text: 'out of scope file (computed): docs/x.md',
+    },
+  ]);
+  assert.ok(comment.includes('out of scope file (computed): docs/x.md'));
+});
+
+test('fails on risk zone outside merged list', () => {
+  const withZones = (zones) =>
+    report({
+      ...JSON.parse(runReport()),
+      risk_zones: zones,
+    });
+  const known = runVerdictCli({
+    reportText: withZones(['ci', 'project_zone']),
+    config: projectConfig(),
+  });
+  assert.strictEqual(known.verdict, 'PASS', known.comment);
+  // The same project zone is unknown without the project's trusted config.
+  const withoutConfig = runVerdictCli({
+    reportText: withZones(['ci', 'project_zone']),
+  });
+  assert.strictEqual(withoutConfig.verdict, 'FAIL');
+  const unknown = runVerdictCli({
+    reportText: withZones(['ci', 'made_up']),
+    config: projectConfig(),
+  });
+  assert.strictEqual(unknown.verdict, 'FAIL');
+  const texts = unknown.result.reasons.map(({ text }) => text);
+  assert.ok(
+    texts.includes('report violates schema: unknown risk zone "made_up"'),
+    texts.join('\n'),
+  );
+  assert.ok(unknown.comment.includes('unknown risk zone "made_up"'));
+});
+
+test('fails closed on a missing or invalid verifier configuration', () => {
+  const missingZones = runVerdictCli({
+    reportText: runReport(),
+    config: ['--project', ALL_CHECKS_PROJECT, '--risk-zones', path.join(ROOT, 'absent.json')],
+  });
+  assert.strictEqual(missingZones.verdict, 'FAIL');
+  const zoneReason = missingZones.result.reasons.find(
+    ({ code }) => code === 'config_invalid',
+  );
+  assert.ok(zoneReason.text.includes('not readable'), zoneReason.text);
+
+  const removing = runVerdictCli({
+    reportText: runReport(),
+    config: projectConfig({ zones: [], remove: ['secrets'] }),
+  });
+  assert.strictEqual(removing.verdict, 'FAIL');
+  assert.ok(
+    removing.result.reasons.some(
+      ({ code, text }) => code === 'config_invalid' && text.includes('"secrets"'),
+    ),
+  );
+
+  const noProfile = runVerdictCli({
+    reportText: runReport(),
+    config: ['--project', path.join(ROOT, 'no-such-project')],
+  });
+  assert.strictEqual(noProfile.verdict, 'FAIL');
+  assert.ok(
+    noProfile.result.reasons.some(
+      ({ code, text }) => code === 'config_invalid' && text.startsWith('profile invalid:'),
+    ),
+  );
+});
+
+test('profile without verifier checks runs none of them', () => {
+  // A failed build is a check finding; with no check enabled only the
+  // model's own report is judged.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verdict-project-'));
+  fs.mkdirSync(path.join(dir, '.factory'));
+  fs.writeFileSync(
+    path.join(dir, '.factory', 'profile.json'),
+    JSON.stringify({ branchTemplate: 'b/{issue}', apps: [{ name: 'main', path: '.' }] }),
+  );
+  const { verdict } = runVerdictCli({
+    reportText: runReport(),
+    ci: FAILED_BUILD_CI,
+    config: ['--project', dir],
+  });
+  assert.strictEqual(verdict, 'PASS');
+  fs.rmSync(dir, { recursive: true });
 });

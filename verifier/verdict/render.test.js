@@ -108,11 +108,11 @@ test('comment always lists tampering, risk zones and scope, even as none', () =>
 
 test('comment lists reported risk zones and out of scope files', () => {
   const raw = report({
-    risk_zones: ['ci', 'adr_034_manual_note'],
+    risk_zones: ['ci', 'project_zone'],
     out_of_scope_files: ['docs/x.md'],
   });
   const comment = renderComment(evaluateChecked(raw), { problem: null });
-  assert.ok(comment.includes('- adr_034_manual_note'));
+  assert.ok(comment.includes('- project_zone'));
   assert.ok(comment.includes('- docs/x.md'));
 });
 
