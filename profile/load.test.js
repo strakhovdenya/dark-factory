@@ -36,16 +36,13 @@ function makeProject(content) {
 function loadError(content) {
   const root = makeProject(content);
   try {
-    assert.throws(() => loadProfile(root));
-    try {
-      loadProfile(root);
-    } catch (error) {
-      return error.message;
-    }
-    return '';
+    loadProfile(root);
+  } catch (error) {
+    return error.message;
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+  assert.fail('loadProfile did not throw');
 }
 
 test('loads valid profile from project root', () => {
@@ -130,4 +127,9 @@ test('rejects enabled ralph without step settings', () => {
   const message = loadError({ ...SINGLE_PACKAGE, ralph: { enabled: true } });
   assert.match(message, /ralph\.techDebtTrackerIssue/);
   assert.match(message, /ralph\.enabledSteps/);
+});
+
+test('rejects duplicate app names', () => {
+  const apps = [{ name: 'web', path: 'a' }, { name: 'web', path: 'b' }];
+  assert.match(loadError({ ...SINGLE_PACKAGE, apps }), /apps\[1\]\.name/);
 });

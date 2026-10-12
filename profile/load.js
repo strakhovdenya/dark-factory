@@ -70,6 +70,14 @@ function loadProfile(projectRoot) {
     const list = [...new Set(lines)].map((line) => `  - ${line}`).join('\n');
     throw new Error(`Invalid profile ${profilePath}:\n${list}`);
   }
+  const seen = new Set();
+  for (const [index, app] of profile.apps.entries()) {
+    if (seen.has(app.name)) {
+      throw new Error(`Invalid profile ${profilePath}:
+  - apps[${index}].name: duplicate app name "${app.name}"`);
+    }
+    seen.add(app.name);
+  }
   return profile;
 }
 
