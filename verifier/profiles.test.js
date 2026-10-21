@@ -101,6 +101,8 @@ const verdictOf = (
   caseDir,
   { registry = coreRegistry, report = readText(caseDir, 'model-report.json') } = {},
 ) => {
+  const enabled = loadProfile(root).verifier?.checks;
+  assert.ok(enabled?.length > 0, 'the profile enables some checks');
   const issue = readText(caseDir, 'issue.md');
   const ciRaw = readText(COMMON, 'ci.json');
   const scan = parseTamperingScan(readText(COMMON, 'tampering-scan.json'));
@@ -116,7 +118,7 @@ const verdictOf = (
     provenance: parseProvenance(readText(COMMON, 'provenance.json')),
     allowedModels: parseAllowedModels(readText(COMMON, 'allowed-models.json')),
     registry,
-    checks: loadProfile(root).verifier?.checks ?? [],
+    checks: enabled,
   });
   return { result, summary: buildResult(singleRun(result)) };
 };
@@ -158,7 +160,7 @@ test('invalid model report fails in both profiles', (t) => {
     for (const root of [profileRoot(fixture), profileCopy(t, fixture)]) {
       const verdict = verdictOf(root, goldenCaseDir(fixture, PASS_CASE), { report });
       assert.strictEqual(verdict.summary.verdict, 'FAIL', fixture);
-      assert.notStrictEqual(verdict.summary.verdict, 'PASS');
+      assert.deepStrictEqual(codesOf(verdict), ['report_missing'], fixture);
     }
   }
 });
@@ -190,6 +192,10 @@ test('dummy check disabled by profile changes nothing', () => {
       assert.deepStrictEqual(registered.summary, plain.summary, `${fixture} ${name}`);
       assert.deepStrictEqual(registered.result.failures, plain.result.failures);
     }
+    // Checks that are off stay off: only the monorepo profile enables the scope check.
+    const outOfScope = verdictOf(root, goldenCaseDir(fixture, FAIL_CASE));
+    const expected = fixture === 'monorepo' ? 'FAIL' : 'PASS';
+    assert.strictEqual(outOfScope.summary.verdict, expected, fixture);
   }
 });
 
