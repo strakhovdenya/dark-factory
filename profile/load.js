@@ -29,7 +29,17 @@ function fieldPath(error) {
   return result;
 }
 
+// A root condition of the schema (allOf) makes labels.calibration required when Judge is on:
+// a missing "labels" object is reported as the missing field the person has to add.
 function describeError(error) {
+  const isJudgeLabelsRule =
+    error.keyword === 'required' &&
+    error.params.missingProperty === 'labels' &&
+    error.schemaPath.startsWith('#/allOf/') &&
+    error.schemaPath.endsWith('/then/required');
+  if (isJudgeLabelsRule) {
+    return 'labels.calibration: required field is missing (judge.enabled is true)';
+  }
   const field = fieldPath(error) || '(profile)';
   if (error.keyword === 'required') return `${field}: required field is missing`;
   if (error.keyword === 'additionalProperties') return `${field}: unknown field`;

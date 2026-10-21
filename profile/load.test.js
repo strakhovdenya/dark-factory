@@ -133,3 +133,53 @@ test('rejects duplicate app names', () => {
   const apps = [{ name: 'web', path: 'a' }, { name: 'web', path: 'b' }];
   assert.match(loadError({ ...SINGLE_PACKAGE, apps }), /apps\[1\]\.name/);
 });
+
+test('validates judge settings in both fixture profiles', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const labelled = (profile) => {
+    profile.labels = { ...profile.labels, calibration: 'mark-for-analysis' };
+  };
+  for (const fixture of FIXTURE_PROFILES) {
+    const variants = {
+      'no judge section': (_profile) => {},
+      'judge disabled': (profile) => {
+        profile.judge = { enabled: false };
+      },
+      'judge disabled with a label': (profile) => {
+        profile.judge = { enabled: false };
+        labelled(profile);
+      },
+      'judge enabled with a label': (profile) => {
+        profile.judge = { enabled: true };
+        labelled(profile);
+      },
+    };
+    for (const [name, mutate] of Object.entries(variants)) {
+      const profile = loadProfile(profileCopy(t, fixture, mutate));
+      assert.ok(profile.apps.length > 0, `${fixture}: ${name}`);
+    }
+
+    const enabledWithoutLabel = (profile) => {
+      profile.judge = { enabled: true };
+    };
+    assert.throws(
+      () => loadProfile(profileCopy(t, fixture, enabledWithoutLabel)),
+      /labels\.calibration/,
+      fixture,
+    );
+    const emptyLabels = (profile) => {
+      profile.judge = { enabled: true };
+      profile.labels = { humanNeeded: 'needs-human' };
+    };
+    assert.throws(
+      () => loadProfile(profileCopy(t, fixture, emptyLabels)),
+      /labels\.calibration/,
+      fixture,
+    );
+    const unknownField = (profile) => {
+      profile.judge = { enabled: true, label: 'x' };
+      labelled(profile);
+    };
+    assert.throws(() => loadProfile(profileCopy(t, fixture, unknownField)), /judge\.label: unknown field/);
+  }
+});

@@ -36,6 +36,8 @@ test('jobflow profile keeps current project values', () => {
   const profile = loadProfile(jobflowRoot);
   assert.equal(profile.ralph.techDebtTrackerIssue, 334);
   assert.equal(profile.labels.humanNeeded, 'ralph-needs-prompt-change');
+  assert.equal(profile.labels.calibration, 'calibrate');
+  assert.deepEqual(profile.judge, { enabled: true });
   assert.equal(profile.protectedPaths.length, 7);
   assert.equal(profile.skillRules.length, 4);
   assert.deepEqual(
@@ -53,6 +55,7 @@ test('cards profile keeps current project values', () => {
   const profile = loadProfile(cardsRoot);
   assert.equal(profile.ralph.techDebtTrackerIssue, 1);
   assert.equal(profile.labels.humanNeeded, 'ralph-needs-db-change');
+  assert.equal(profile.judge, undefined, 'Judge stays off for a project that does not enable it');
   assert.equal(profile.apps.length, 1);
   const { gate } = profile.apps[0];
   assert.equal(gate.length, 4);

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { checkPackageLayout, checkRepository } = require('./package-layout');
 
-const GOOD = ['skills/', 'agents/', 'hooks/', 'profile/', 'verifier/'];
+const GOOD = ['skills/', 'agents/', 'hooks/', 'profile/', 'verifier/', 'judge/'];
 
 test('accepts files field of the repository package.json', () => {
   assert.deepEqual(checkRepository(path.resolve(__dirname, '..', '..')), []);
@@ -20,7 +20,7 @@ test('rejects files entry under .claude or .factory', () => {
 });
 
 test('rejects files field missing a package directory', () => {
-  for (const dir of ['skills', 'agents', 'hooks', 'profile', 'verifier']) {
+  for (const dir of ['skills', 'agents', 'hooks', 'profile', 'verifier', 'judge']) {
     const files = GOOD.filter((entry) => entry !== `${dir}/`);
     const errors = checkPackageLayout({ files });
     assert.equal(errors.length, 1, dir);

@@ -1,0 +1,1227 @@
+name: Calibration Judge
+
+# Reusable workflow: root-cause analysis of one Acceptance Verifier round. A round is one attempt
+# of the verifier workflow on a PR (run ID + attempt). Judge is an optional element and is off
+# unless the project profile (.factory/profile.json on the default branch) says
+# `judge.enabled: true`. A project calls this workflow from a short wrapper
+# (examples/wrappers/calibration-judge.yml): a workflow in another repository cannot subscribe to
+# the project's workflow_run, labeled or manual events, so the wrapper stays in the project.
+#
+# Judge only observes: it never changes the verdict, the `Acceptance Verifier` status or labels,
+# it is not a required check, and its failure cannot turn a PR red. Trust boundaries are those of
+# the verifier:
+# - Judge code (scripts, prompts, schema templates, the inputs config) comes only from the
+#   checkout of this repository at `factory-sha`. The wrapper calls this workflow at the same full
+#   SHA. Before an enabled Judge does anything, the `dark-factory` tag pinned in the project's
+#   package.json on its DEFAULT branch must resolve to that same commit.
+# - Project values come only from the project's default-branch checkout (`trusted/`, at
+#   github.sha): the profile (branch template, calibration label, `judge.enabled`), the owners
+#   and the Judge settings in .github/calibration/ (taxonomy, allowed models).
+# - The PR head is checked out only as data; nothing from it is executed. OPENAI_API_KEY reaches
+#   only the two model steps. Stage 1 and stage 2 are separate jobs because drop-sudo runs once
+#   per job; stage 1 sees only the independent package.
+# - The rules a past round used are read from the policy snapshot that round stored
+#   (`policy-snapshot` artifact), as data; the project's current settings are never presented as
+#   the settings of a past round. A round without a trustworthy snapshot is analysed with that
+#   input marked missing.
+#
+# Which rounds are analysed: the verdict is FAIL or NEEDS_HUMAN and an owner
+# (.github/verifier/owners.json) put the calibration label (`labels.calibration` of the profile)
+# on the task's Issue or on its PR. `judge/trigger.js` decides, via `check-trigger`; this file
+# only passes data and acts on the answer. Entry points, all started by the wrapper: the verifier
+# finishing a round (`workflow_run`; a standing label also covers every later round), the label
+# being added afterwards (`pull_request_target` / `issues`, `labeled`; analyses the latest round
+# only when it is on the PR's current head), and a manual run with a PR number and, optionally, a
+# verifier run ID and attempt. A manual run skips only the verdict and label conditions: a
+# disabled Judge, the PR check, the binding of the round and the trust boundaries still apply.
+#
+# Failures. A valid profile with Judge off or absent is an ordinary skip. An invalid or missing
+# profile, or a wrapper SHA that is not the pinned release, is a configuration error: nothing
+# runs, the reason is logged and written to the summary; an automatic run still ends without an
+# error, a manual run fails. Expected failures of an automatic run (the inputs of the round, the
+# model stages, a rejected model) are absorbed in the job where they happen and handed on as
+# outputs; the analysis then reports the error. Unexpected defects are not suppressed.
+
+on:
+  workflow_call:
+    inputs:
+      factory-sha:
+        description: Full commit SHA of this repository the wrapper calls the workflow at; the project's pinned tag must resolve to it.
+        required: true
+        type: string
+      judge-model:
+        description: Judge model (the project's CALIBRATION_JUDGE_MODEL variable). It must be in .github/calibration/allowed-models.json.
+        required: false
+        default: ''
+        type: string
+      verifier-model:
+        description: Current verifier model (the project's VERIFIER_MODEL variable); used only when the round's provenance does not record its model.
+        required: false
+        default: ''
+        type: string
+      pr:
+        description: Pull request number of a manual run.
+        required: false
+        default: ''
+        type: string
+      run-id:
+        description: Acceptance Verifier run ID of a manual run (default - latest round).
+        required: false
+        default: ''
+        type: string
+      run-attempt:
+        description: Attempt of that run (default - latest round).
+        required: false
+        default: ''
+        type: string
+    secrets:
+      OPENAI_API_KEY:
+        description: Key for the Judge model; used only by the two jobs that run the model.
+        required: true
+
+permissions: {}
+
+env:
+  # Same Codex CLI as the verifier (acceptance-verifier.yml); see the pin comment there.
+  CODEX_VERSION: 0.156.1
+  # This repository; the Judge code is checked out from it at factory-sha.
+  FACTORY_REPOSITORY: strakhovdenya/dark-factory
+  NODE_VERSION: 22
+
+jobs:
+  config:
+    name: Judge configuration
+    # A verifier run that did not conclude with success or failure (skipped for a non-PR CI run,
+    # cancelled) published nothing and is not a round. Label events are filtered by name later.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target' || github.event_name == 'issues' || github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      enabled: ${{ steps.config.outputs.enabled }}
+      config: ${{ steps.config.outputs.config }}
+      label: ${{ steps.config.outputs.label }}
+    steps:
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .factory
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Production dependencies only (the profile loader's schema validator); no lifecycle scripts.
+      - name: Install factory dependencies
+        working-directory: factory
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      # The only place that decides whether Judge is on. `enabled` is true only for a valid
+      # profile with judge.enabled: true whose wrapper SHA is the project's pinned release. The
+      # command itself fails (job error) only for a defect of its own; every configuration
+      # problem is an answer.
+      - name: Read Judge configuration
+        id: config
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          FACTORY_SHA: ${{ inputs.factory-sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            CONFIG=$(jq -n -c --arg ref "$REF_NAME" --arg branch "$DEFAULT_BRANCH" \
+              '{status: "invalid", reason: ("a manual run must start on the default branch " + $branch + ", not " + $ref)}')
+          else
+            CONFIG=$(node factory/judge/calibration-judge.js config --project trusted \
+              --factory-repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA")
+          fi
+          STATUS=$(jq -r '.status' <<< "$CONFIG")
+          REASON=$(jq -r '.reason' <<< "$CONFIG")
+          {
+            echo "config=$CONFIG"
+            echo "label=$(jq -r '.label // empty' <<< "$CONFIG")"
+          } >> "$GITHUB_OUTPUT"
+          case "$STATUS" in
+            enabled)
+              echo "enabled=true" >> "$GITHUB_OUTPUT"
+              echo "- Calibration Judge: enabled" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            disabled)
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Calibration Judge is off: $REASON"
+              echo "- Calibration Judge: off ($REASON)" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Calibration Judge configuration error: $REASON"
+              echo "- Calibration Judge: configuration error ($REASON)" >> "$GITHUB_STEP_SUMMARY"
+              if [ "$EVENT_NAME" = "workflow_dispatch" ]; then exit 1; fi
+              ;;
+          esac
+
+  collect:
+    name: Collect inputs
+    needs: config
+    if: needs.config.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: read
+      statuses: read
+    outputs:
+      pr_number: ${{ steps.state.outputs.pr_number }}
+      run_id: ${{ steps.round.outputs.run_id }}
+      run_attempt: ${{ steps.round.outputs.run_attempt }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      skip: ${{ steps.state.outputs.skip }}
+      failed: ${{ steps.state.outputs.failed }}
+      failure_reason: ${{ steps.state.outputs.failure_reason }}
+      model_allowed: ${{ steps.model.outputs.allowed }}
+    steps:
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .factory
+            .github/verifier
+            .github/calibration
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install factory dependencies
+        working-directory: factory
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+      # What a round publishes and where it is found: the same constants the verifier workflow
+      # uses (verifier/round-protocol.js), not settings of the project.
+      - name: Read round protocol
+        id: protocol
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          PROTOCOL=$(node factory/judge/calibration-judge.js round-protocol)
+          {
+            echo "workflow_path=$(jq -r '.workflow_path' <<< "$PROTOCOL")"
+            echo "status_context=$(jq -r '.status_context' <<< "$PROTOCOL")"
+            echo "artifact_verdict=$(jq -r '.artifacts.verdict' <<< "$PROTOCOL")"
+            echo "artifact_second=$(jq -r '.artifacts.verdictSecond' <<< "$PROTOCOL")"
+            echo "artifact_report=$(jq -r '.artifacts.verdictReport' <<< "$PROTOCOL")"
+            echo "artifact_snapshot=$(jq -r '.artifacts.policySnapshot' <<< "$PROTOCOL")"
+          } >> "$GITHUB_OUTPUT"
+
+      # A label event names the pull request to analyse: the PR itself, or the open PR of the
+      # labeled Issue's task branch (found with the profile's branch template). Other labels, and
+      # an Issue without a task PR, end the run. A failure here of an automatic run is absorbed
+      # and reported by the last step; a manual run fails.
+      - name: Locate pull request of a label event
+        id: target
+        if: github.event_name == 'pull_request_target' || github.event_name == 'issues'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          EVENT_PR: ${{ github.event.pull_request.number }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+          JUDGE_LABEL: ${{ needs.config.outputs.label }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice::$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          if [ "$EVENT_LABEL" != "$JUDGE_LABEL" ]; then skip "Label is not the calibration label"; fi
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            PR_NUMBER="$EVENT_PR"
+          else
+            if [[ ! "$EVENT_ISSUE" =~ ^[0-9]+$ ]]; then skip "Issue number is not valid"; fi
+            gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '.[]' | jq -s '.' > meta/pulls.json
+            PR_NUMBER=$(node factory/judge/calibration-judge.js find-pr --pulls meta/pulls.json \
+              --issue "$EVENT_ISSUE" --repository "$REPO" --project trusted)
+          fi
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then skip "No pull request for the labeled item"; fi
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      # Picks the round. Every untrusted value reaches the shell only through env. A
+      # workflow_run attempt that is not a round (stale: Verify succeeded and Report was
+      # skipped) is skipped quietly; a manual run fails with the reason instead.
+      - name: Resolve round
+        id: round
+        if: steps.target.outcome != 'failure' && steps.target.outputs.skip != 'true'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          TARGET_PR: ${{ steps.target.outputs.pr_number }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          INPUT_PR: ${{ inputs.pr }}
+          INPUT_RUN_ID: ${{ inputs.run-id }}
+          INPUT_RUN_ATTEMPT: ${{ inputs.run-attempt }}
+          VERIFIER_WORKFLOW: ${{ steps.protocol.outputs.workflow_path }}
+          VERIFIER_CONTEXT: ${{ steps.protocol.outputs.status_context }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice::$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          RESOLVE_ARGS=()
+          # A manual run and a label event look the round up on the PR; only workflow_run
+          # already knows the round.
+          if [ "$EVENT_NAME" != "workflow_run" ]; then
+            PR_INPUT="${INPUT_PR:-$TARGET_PR}"
+            if [[ ! "$PR_INPUT" =~ ^[0-9]+$ ]]; then echo "::error::pr must be a number"; exit 1; fi
+            PR_LABEL="$PR_INPUT"
+            if [ -n "$INPUT_RUN_ID" ]; then
+              if [[ ! "$INPUT_RUN_ID" =~ ^[0-9]+$ ]]; then echo "::error::run-id must be a number"; exit 1; fi
+              RUN_IDS="$INPUT_RUN_ID"
+              RESOLVE_ARGS+=(--run-id "$INPUT_RUN_ID")
+            else
+              # `Report` sets this status on the PR head commit in every round; its target_url
+              # is the run. A forged status is harmless: the run must be a verifier run, and
+              # check-pr ties the round to the PR below.
+              RUN_IDS=$(for SHA in $(gh api --paginate "repos/$REPO/pulls/$PR_INPUT/commits" --jq '.[].sha'); do
+                gh api --paginate "repos/$REPO/commits/$SHA/statuses" \
+                  | jq -r --arg context "$VERIFIER_CONTEXT" '.[] | select(.context == $context) | .target_url'
+              done | { grep -oE '/actions/runs/[0-9]+' || true; } | grep -oE '[0-9]+$' | sort -u || true)
+            fi
+            if [ -n "$INPUT_RUN_ATTEMPT" ]; then
+              if [[ ! "$INPUT_RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then echo "::error::run-attempt must be a number"; exit 1; fi
+              RESOLVE_ARGS+=(--run-attempt "$INPUT_RUN_ATTEMPT")
+            fi
+          else
+            PR_LABEL="?"
+            RUN_IDS="$EVENT_RUN_ID"
+            RESOLVE_ARGS+=(--run-id "$EVENT_RUN_ID" --run-attempt "$EVENT_RUN_ATTEMPT")
+          fi
+
+          : > meta/attempts.jsonl
+          for RUN_ID in $RUN_IDS; do
+            RUN_JSON=$(gh api "repos/$REPO/actions/runs/$RUN_ID")
+            if [ "$(jq -r '.path' <<< "$RUN_JSON")" != "$VERIFIER_WORKFLOW" ]; then
+              echo "::warning::Run $RUN_ID is not an Acceptance Verifier run; ignored"
+              continue
+            fi
+            LAST_ATTEMPT=$(jq -r '.run_attempt' <<< "$RUN_JSON")
+            for ATTEMPT in $(seq 1 "$LAST_ATTEMPT"); do
+              ATTEMPT_JSON=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT" \
+                --jq '{run_id: .id, run_attempt, status, conclusion, run_started_at, updated_at}')
+              JOBS=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" \
+                --jq '.jobs[] | {name, status, conclusion}' | jq -s '.')
+              jq -c -n --argjson a "$ATTEMPT_JSON" --argjson j "$JOBS" '$a + {jobs: $j}' >> meta/attempts.jsonl
+            done
+          done
+          jq -s '.' meta/attempts.jsonl > meta/attempts.json
+
+          # resolve-round exits 4 only for the legitimate "no round found"
+          # result; any other non-zero code (its own internal-error code 3, or
+          # Node's 1 for an uncaught error such as a missing module) fails the
+          # step, so a crash cannot be mistaken for "not a round".
+          RESOLVE_STDERR=$(mktemp)
+          if ROUND=$(node factory/judge/calibration-judge.js resolve-round \
+            --attempts meta/attempts.json --inputs factory/judge/inputs.json \
+            --pr "$PR_LABEL" "${RESOLVE_ARGS[@]}" 2>"$RESOLVE_STDERR"); then
+            RESOLVE_EXIT=0
+          else
+            RESOLVE_EXIT=$?
+          fi
+          if [ "$RESOLVE_EXIT" -ne 0 ]; then
+            cat "$RESOLVE_STDERR" >&2
+            if [ "$RESOLVE_EXIT" -eq 4 ] && [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+              skip "Verifier attempt is not a round"
+            fi
+            echo "::error::resolve-round failed with exit code $RESOLVE_EXIT"
+            exit 1
+          fi
+          RUN_ID=$(jq -r '.run_id' <<< "$ROUND")
+          RUN_ATTEMPT=$(jq -r '.run_attempt' <<< "$ROUND")
+          jq --argjson id "$RUN_ID" --argjson n "$RUN_ATTEMPT" \
+            '.[] | select(.run_id == $id and .run_attempt == $n)' meta/attempts.json > meta/attempt.json
+          {
+            echo "skip=false"
+            echo "run_id=$RUN_ID"
+            echo "run_attempt=$RUN_ATTEMPT"
+          } >> "$GITHUB_OUTPUT"
+          echo "Calibration Judge: verifier run $RUN_ID, attempt $RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
+
+      # Artifacts belong to a run, not to an attempt. For each name the newest artifact created
+      # before this attempt ended is taken: a rerun of only `Report` keeps the earlier `verdict`,
+      # and a later attempt's artifacts are never mixed into this round. The policy snapshot is
+      # selected by the same rule below, after the pull request is known.
+      - name: Download verifier artifacts of the round
+        id: artifacts
+        if: steps.round.outcome == 'success' && steps.round.outputs.skip == 'false'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ steps.round.outputs.run_id }}
+          ARTIFACT_NAMES: ${{ steps.protocol.outputs.artifact_verdict }} ${{ steps.protocol.outputs.artifact_second }} ${{ steps.protocol.outputs.artifact_report }}
+        run: |
+          set -euo pipefail
+          END=$(jq -r '.updated_at' meta/attempt.json)
+          gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[] | {id, name, created_at, expired}' | jq -s '.' > meta/artifacts.json
+          for NAME in $ARTIFACT_NAMES; do
+            ID=$(jq -r --arg name "$NAME" --arg end "$END" \
+              'map(select(.name == $name and (.expired | not) and .created_at <= $end))
+               | sort_by(.created_at) | last | .id // empty' meta/artifacts.json)
+            if [ -z "$ID" ]; then echo "- artifact $NAME: absent" >> "$GITHUB_STEP_SUMMARY"; continue; fi
+            gh api "repos/$REPO/actions/artifacts/$ID/zip" > "meta/$NAME.zip"
+            mkdir -p "art/$NAME"
+            unzip -q "meta/$NAME.zip" -d "art/$NAME"
+            echo "- artifact $NAME: $ID" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      # The round's PR and head commit come from `verdict-report.json`, or for rounds before it
+      # existed from the `verdict` artifact's ci.json/provenance.json head commit. check-pr then
+      # requires a task branch (the profile's branch template) of this repository and ties the
+      # round to the PR (fail closed). workflow_run: a round that is not for such a PR is
+      # skipped quietly.
+      - name: Identify pull request
+        id: pr
+        if: steps.artifacts.outcome == 'success'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PR: ${{ inputs.pr }}
+          TARGET_PR: ${{ steps.target.outputs.pr_number }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          CONFIG_JSON: ${{ needs.config.outputs.config }}
+        run: |
+          set -euo pipefail
+          reject() {
+            if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+              echo "::notice::$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            echo "::error::$1"; exit 1
+          }
+          printf '%s' "$CONFIG_JSON" > meta/config.json
+          ROUND_PR=""
+          ROUND_SHA=""
+          if [ -f art/verdict-report/verdict-report.json ]; then
+            ROUND_PR=$(jq -r '.pr_number // empty' art/verdict-report/verdict-report.json)
+            ROUND_SHA=$(jq -r '.head_sha // empty' art/verdict-report/verdict-report.json)
+          fi
+          for FILE in art/verdict/ci.json art/verdict/provenance.json; do
+            if [ -z "$ROUND_SHA" ] && [ -f "$FILE" ]; then ROUND_SHA=$(jq -r '.head_sha // empty' "$FILE"); fi
+          done
+          jq -n --arg pr "$ROUND_PR" --arg head "$ROUND_SHA" \
+            '{pr_number: (if $pr == "" then null else $pr end), head_sha: (if $head == "" then null else $head end)}' \
+            > meta/round.json
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            PR_NUMBER="$INPUT_PR"
+          elif [ "$EVENT_NAME" != "workflow_run" ]; then
+            PR_NUMBER="$TARGET_PR"
+          else
+            PR_NUMBER="$ROUND_PR"
+            if [ -z "$PR_NUMBER" ] && [ -n "$ROUND_SHA" ]; then
+              PR_NUMBER=$(gh api "repos/$REPO/commits/$ROUND_SHA/pulls" \
+                | jq -r --arg sha "$ROUND_SHA" '[.[] | select(.head.sha == $sha)][0].number // empty')
+            fi
+          fi
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then reject "Round has no pull request"; fi
+
+          PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+          SHAS=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" --jq '.[].sha' | jq -R . | jq -s '.')
+          jq --argjson shas "$SHAS" \
+            '{number, head_ref: .head.ref, head_repo: .head.repo.full_name, commit_shas: $shas}' \
+            <<< "$PR_JSON" > meta/pull.json
+          if ! REASON=$(node factory/judge/calibration-judge.js check-pr --pull meta/pull.json \
+            --round meta/round.json --repository "$REPO" --project trusted 2>&1); then
+            reject "$REASON"
+          fi
+          jq -r '.base.sha' <<< "$PR_JSON" > meta/base-sha.txt
+
+          # trigger.js decides for every way of starting Judge: a disabled Judge never runs; a
+          # manual run skips only the verdict and label conditions; the others need the verdict
+          # FAIL or NEEDS_HUMAN and an owner's label on the Issue or the PR. The timelines are
+          # read now, so a label set or removed since the round counts as it is.
+          BRANCH=$(jq -r '.head.ref' <<< "$PR_JSON")
+          CURRENT_HEAD=$(jq -r '.head.sha' <<< "$PR_JSON")
+          VERDICT=$(jq -r '.verdict // empty' art/verdict-report/verdict-report.json 2>/dev/null || true)
+          fetch_timeline() {
+            gh api --paginate "repos/$REPO/issues/$1/timeline" --jq '.[]' | jq -s '.' > "$2" \
+              || { echo "::warning::Timeline of #$1 could not be read; its labels are not counted"; echo '[]' > "$2"; }
+          }
+          fetch_timeline "$PR_NUMBER" meta/pull-timeline.json
+          TRIGGER_ARGS=(check-trigger --owners trusted/.github/verifier/owners.json \
+            --config meta/config.json --verdict "$VERDICT" --pull-timeline meta/pull-timeline.json \
+            --round-head "$ROUND_SHA" --current-head "$CURRENT_HEAD")
+          ISSUE_NUMBER=$(node factory/judge/calibration-judge.js issue-number --branch "$BRANCH" --project trusted)
+          if [ -n "$ISSUE_NUMBER" ]; then
+            fetch_timeline "$ISSUE_NUMBER" meta/issue-timeline.json
+            TRIGGER_ARGS+=(--issue-timeline meta/issue-timeline.json)
+          fi
+          case "$EVENT_NAME" in
+            workflow_run) TRIGGER_ARGS+=(--event round) ;;
+            workflow_dispatch) TRIGGER_ARGS+=(--event manual) ;;
+            *) TRIGGER_ARGS+=(--event labeled --event-label "$EVENT_LABEL") ;;
+          esac
+          # Any failure of the command itself fails the step: only an answer may skip.
+          DECISION=$(node factory/judge/calibration-judge.js "${TRIGGER_ARGS[@]}")
+          echo "Calibration Judge trigger: $DECISION" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$DECISION" != run:* ]]; then reject "$DECISION"; fi
+          {
+            echo "skip=false"
+            echo "pr_number=$PR_NUMBER"
+            echo "head_sha=$ROUND_SHA"
+            echo "branch=$BRANCH"
+          } >> "$GITHUB_OUTPUT"
+          echo "Calibration Judge: PR #$PR_NUMBER, head $ROUND_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      # The rules the round used, from the policy snapshot it stored. The snapshot is found like
+      # the `verdict` artifact (newest created before the attempt ended) and read as data. A round
+      # without a snapshot (older, expired, never formed) or with one that cannot be trusted gets
+      # a status that says so; nothing from the project's current settings takes its place.
+      - name: Read policy snapshot of the round
+        id: snapshot
+        if: steps.pr.outcome == 'success' && steps.pr.outputs.skip == 'false'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ steps.round.outputs.run_id }}
+          RUN_ATTEMPT: ${{ steps.round.outputs.run_attempt }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          SNAPSHOT_ARTIFACT: ${{ steps.protocol.outputs.artifact_snapshot }}
+        run: |
+          set -uo pipefail
+          mkdir -p raw/trusted
+          END=$(jq -r '.updated_at' meta/attempt.json)
+          ID=$(jq -r --arg name "$SNAPSHOT_ARTIFACT" --arg end "$END" \
+            'map(select(.name == $name and (.expired | not) and .created_at <= $end))
+             | sort_by(.created_at) | last | .id // empty' meta/artifacts.json)
+          EXPIRED=$(jq -r --arg name "$SNAPSHOT_ARTIFACT" --arg end "$END" \
+            'map(select(.name == $name and .expired and .created_at <= $end)) | length' meta/artifacts.json)
+          SNAPSHOT_ARGS=()
+          if [ -z "$ID" ]; then
+            if [ "$EXPIRED" != "0" ]; then
+              SNAPSHOT_ARGS+=(--missing-reason "the policy snapshot artifact of the round has expired")
+            else
+              SNAPSHOT_ARGS+=(--missing-reason "the round has no policy snapshot artifact (an older round, or it was not formed)")
+            fi
+          elif gh api "repos/$REPO/actions/artifacts/$ID/zip" > meta/policy-snapshot.zip \
+            && mkdir -p art/policy-snapshot && unzip -q meta/policy-snapshot.zip -d art/policy-snapshot; then
+            SNAPSHOT_ARGS+=(--snapshot art/policy-snapshot/policy-snapshot.json)
+          else
+            SNAPSHOT_ARGS+=(--failure-reason "the policy snapshot artifact could not be downloaded")
+          fi
+          STATUS=$(node factory/judge/calibration-judge.js read-snapshot --inputs factory/judge/inputs.json \
+            --provenance art/verdict/provenance.json --run-id "$RUN_ID" --run-attempt "$RUN_ATTEMPT" \
+            --head-sha "$HEAD_SHA" --out-dir raw/trusted --status-out raw/policy-status.json "${SNAPSHOT_ARGS[@]}")
+          echo "- policy snapshot of the round: $STATUS" >> "$GITHUB_STEP_SUMMARY"
+
+      # Builds the raw directory `collect` reads (factory/judge/inputs.json). When the round has
+      # no `verdict-report` comment (rounds before it existed), the current verifier comment is
+      # read through the API instead and marked not historical.
+      - name: Build raw inputs
+        id: raw
+        if: steps.snapshot.outcome == 'success'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p raw
+          if [ -d art/verdict ]; then
+            find art/verdict -maxdepth 1 -type f -exec cp {} raw/ \;
+            for FILE in issue.md issue-body.md files.txt diff.patch; do
+              if [ -f "art/verdict/.verifier/$FILE" ]; then cp "art/verdict/.verifier/$FILE" raw/; fi
+            done
+          fi
+          if [ -d art/verdict-second ]; then find art/verdict-second -maxdepth 1 -type f -exec cp {} raw/ \;; fi
+          HISTORICAL_COMMENT=true
+          if [ -f art/verdict-report/comment.md ]; then
+            cp art/verdict-report/comment.md raw/verifier-comment.md
+          else
+            HISTORICAL_COMMENT=false
+            gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- acceptance-verifier -->"))) | .body' \
+              > meta/verifier-comment.md
+            if [ -s meta/verifier-comment.md ]; then cp meta/verifier-comment.md raw/verifier-comment.md; fi
+          fi
+          echo "historical_comment=$HISTORICAL_COMMENT" >> "$GITHUB_OUTPUT"
+
+          ISSUE_NUMBER=$(node factory/judge/calibration-judge.js issue-number --branch "$BRANCH" --project trusted)
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json title,body \
+              --jq '"# " + .title + "\n\n" + .body' > raw/issue-current.md
+            gh api --paginate "repos/$REPO/issues/$ISSUE_NUMBER/comments" \
+              --jq '.[] | {id, created_at, body}' | jq -s '.' > raw/pr-comments.json
+          fi
+          jq --arg repo "$REPO" '{run_id, run_attempt, repository: $repo, conclusion}' meta/attempt.json > raw/run.json
+          jq '{jobs}' meta/attempt.json > raw/jobs.json
+          # base_sha is the merge base of the round's head with the PR's base branch, not the branch
+          # tip when Judge runs: it stays the same for every later Judge run and can be computed
+          # the same way for an earlier round (the verifier records no base commit).
+          BASE_TIP=$(cat meta/base-sha.txt)
+          MERGE_BASE=""
+          if [[ "$BASE_TIP" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            MERGE_BASE=$(gh api "repos/$REPO/compare/$BASE_TIP...$HEAD_SHA" --jq '.merge_base_commit.sha' || true)
+          fi
+          if [[ ! "$MERGE_BASE" =~ ^[0-9a-f]{40}$ ]]; then MERGE_BASE=""; fi
+          jq -n --arg head "$HEAD_SHA" --arg base "$MERGE_BASE" \
+            '{head_sha: $head, base_sha: (if $base == "" then null else $base end)}' > raw/pr.json
+          if [ -f art/verdict-report/result.json ]; then cp art/verdict-report/result.json raw/result.json; fi
+
+      # The previous round, for stage 2 only: its analysis comes from the hidden rounds block of
+      # Judge's own comment, its manifest from collecting that round's verifier artifacts again,
+      # plus the code diff between the two head commits, the issue diff and the diff of the rules
+      # (from the two rounds' policy snapshots), and the script results `compare` and
+      # `transitions`. These files are full-only inputs (inputs.json); stage 1 never downloads
+      # them. A part that cannot be built is left out and becomes an absent input;
+      # previous-round.json always states whether an earlier round exists (absent), was read
+      # (present) or could not be read (unreadable). `compare` and `transitions` treat the round
+      # as the first one only when no earlier round exists; when an earlier round exists but
+      # cannot be rebuilt, their results are left out instead.
+      - name: Build previous round inputs
+        id: previous
+        if: steps.raw.outcome == 'success'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          RUN_ID: ${{ steps.round.outputs.run_id }}
+          RUN_ATTEMPT: ${{ steps.round.outputs.run_attempt }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          ARTIFACT_NAMES: ${{ steps.protocol.outputs.artifact_verdict }} ${{ steps.protocol.outputs.artifact_second }} ${{ steps.protocol.outputs.artifact_report }}
+          SNAPSHOT_ARTIFACT: ${{ steps.protocol.outputs.artifact_snapshot }}
+        run: |
+          set -uo pipefail
+          INPUTS=factory/judge/inputs.json
+          mkdir -p prev/raw/trusted pkg/context
+          if ! gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '.[] | {id, user: {login: .user.login}, body}' | jq -s '.' > meta/judge-comments.json; then
+            rm -f meta/judge-comments.json
+          fi
+          node factory/judge/calibration-judge.js previous-round --comments meta/judge-comments.json \
+            --author 'github-actions[bot]' --repository "$REPO" --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" --out raw/previous-round.json
+          PREV_STATUS=$(jq -r '.status' raw/previous-round.json)
+          echo "- previous round: $PREV_STATUS" >> "$GITHUB_STEP_SUMMARY"
+
+          PREV_PKG=""
+          PREV_TRANSITIONS=""
+          if [ "$PREV_STATUS" = "absent" ]; then
+            PREV_PKG=none
+            PREV_TRANSITIONS=none
+          fi
+          if [ "$PREV_STATUS" = "present" ]; then
+            PREV_RUN=$(jq -r '.round_key.verifier_run_id' raw/previous-round.json)
+            PREV_ATTEMPT=$(jq -r '.round_key.verifier_run_attempt' raw/previous-round.json)
+            PREV_HEAD=$(jq -r '.head_sha // empty' raw/previous-round.json)
+            if [[ "$PREV_RUN" =~ ^[0-9]+$ && "$PREV_ATTEMPT" =~ ^[0-9]+$ ]] \
+              && gh api "repos/$REPO/actions/runs/$PREV_RUN/attempts/$PREV_ATTEMPT" > meta/prev-attempt.json; then
+              END=$(jq -r '.updated_at' meta/prev-attempt.json)
+              ARTIFACTS=$(gh api --paginate "repos/$REPO/actions/runs/$PREV_RUN/artifacts" \
+                --jq '.artifacts[] | {id, name, created_at, expired}' | jq -s '.')
+              for NAME in $ARTIFACT_NAMES; do
+                ID=$(jq -r --arg name "$NAME" --arg end "$END" \
+                  'map(select(.name == $name and (.expired | not) and .created_at <= $end))
+                   | sort_by(.created_at) | last | .id // empty' <<< "$ARTIFACTS")
+                if [ -z "$ID" ]; then continue; fi
+                gh api "repos/$REPO/actions/artifacts/$ID/zip" > "meta/prev-$NAME.zip" \
+                  && mkdir -p "prev/art/$NAME" && unzip -q "meta/prev-$NAME.zip" -d "prev/art/$NAME"
+              done
+              if [ -d prev/art/verdict ]; then
+                find prev/art/verdict -maxdepth 1 -type f -exec cp {} prev/raw/ \;
+                for FILE in issue.md issue-body.md; do
+                  if [ -f "prev/art/verdict/.verifier/$FILE" ]; then cp "prev/art/verdict/.verifier/$FILE" prev/raw/; fi
+                done
+              fi
+              if [ -d prev/art/verdict-second ]; then find prev/art/verdict-second -maxdepth 1 -type f -exec cp {} prev/raw/ \;; fi
+              if [ -f prev/art/verdict-report/result.json ]; then cp prev/art/verdict-report/result.json prev/raw/; fi
+              if [ -f prev/art/verdict-report/comment.md ]; then cp prev/art/verdict-report/comment.md prev/raw/verifier-comment.md; fi
+              jq --arg repo "$REPO" '{run_id: .id, run_attempt, repository: $repo, conclusion}' \
+                meta/prev-attempt.json > prev/raw/run.json
+              gh api --paginate "repos/$REPO/actions/runs/$PREV_RUN/attempts/$PREV_ATTEMPT/jobs" \
+                --jq '.jobs[] | {name, status, conclusion}' | jq -s '{jobs: .}' > prev/raw/jobs.json
+              # Same base as the current round: the merge base with the PR base branch tip.
+              BASE_TIP=$(cat meta/base-sha.txt)
+              PREV_BASE=""
+              if [[ "$BASE_TIP" =~ ^[0-9a-f]{40}$ && "$PREV_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+                PREV_BASE=$(gh api "repos/$REPO/compare/$BASE_TIP...$PREV_HEAD" --jq '.merge_base_commit.sha' || true)
+              fi
+              if [[ ! "$PREV_BASE" =~ ^[0-9a-f]{40}$ ]]; then PREV_BASE=""; fi
+              jq -n --arg head "$PREV_HEAD" --arg base "$PREV_BASE" \
+                '{head_sha: (if $head == "" then null else $head end), base_sha: (if $base == "" then null else $base end)}' \
+                > prev/raw/pr.json
+
+              # The rules that round used, from its own policy snapshot, read like the current
+              # round's. The earlier round's rules are never rebuilt from current settings.
+              PREV_SNAPSHOT_ARGS=()
+              SNAP_ID=$(jq -r --arg name "$SNAPSHOT_ARTIFACT" --arg end "$END" \
+                'map(select(.name == $name and (.expired | not) and .created_at <= $end))
+                 | sort_by(.created_at) | last | .id // empty' <<< "$ARTIFACTS")
+              SNAP_EXPIRED=$(jq -r --arg name "$SNAPSHOT_ARTIFACT" --arg end "$END" \
+                'map(select(.name == $name and .expired and .created_at <= $end)) | length' <<< "$ARTIFACTS")
+              if [ -z "$SNAP_ID" ]; then
+                if [ "$SNAP_EXPIRED" != "0" ]; then
+                  PREV_SNAPSHOT_ARGS+=(--missing-reason "the policy snapshot artifact of the earlier round has expired")
+                else
+                  PREV_SNAPSHOT_ARGS+=(--missing-reason "the earlier round has no policy snapshot artifact")
+                fi
+              elif gh api "repos/$REPO/actions/artifacts/$SNAP_ID/zip" > meta/prev-policy-snapshot.zip \
+                && mkdir -p prev/art/policy-snapshot && unzip -q meta/prev-policy-snapshot.zip -d prev/art/policy-snapshot; then
+                PREV_SNAPSHOT_ARGS+=(--snapshot prev/art/policy-snapshot/policy-snapshot.json)
+              else
+                PREV_SNAPSHOT_ARGS+=(--failure-reason "the policy snapshot artifact of the earlier round could not be downloaded")
+              fi
+              node factory/judge/calibration-judge.js read-snapshot --inputs "$INPUTS" \
+                --provenance prev/raw/provenance.json --run-id "$PREV_RUN" --run-attempt "$PREV_ATTEMPT" \
+                --head-sha "$PREV_HEAD" --out-dir prev/raw/trusted --status-out prev/raw/policy-status.json \
+                "${PREV_SNAPSHOT_ARGS[@]}" > /dev/null
+              node factory/judge/calibration-judge.js policy-diff --current raw --previous prev/raw \
+                --inputs "$INPUTS" --out raw/policy-diff.patch || rm -f raw/policy-diff.patch
+
+              if node factory/judge/calibration-judge.js collect prev/raw --inputs "$INPUTS" \
+                --out prev/pkg > meta/prev-collect.log; then
+                cp prev/pkg/manifest.json raw/previous-manifest.json
+                PREV_PKG=prev/pkg
+              fi
+              PREV_TRANSITIONS=prev/raw
+            fi
+            if [[ "$PREV_HEAD" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              if [ "$PREV_HEAD" = "$HEAD_SHA" ]; then
+                : > raw/head-diff.patch
+              elif ! gh api -H 'Accept: application/vnd.github.diff' \
+                "repos/$REPO/compare/$PREV_HEAD...$HEAD_SHA" > raw/head-diff.patch; then
+                rm -f raw/head-diff.patch
+              fi
+            fi
+            CURRENT_ISSUE=raw/issue.md
+            if [ ! -f "$CURRENT_ISSUE" ]; then CURRENT_ISSUE=raw/issue-current.md; fi
+            if [ -f prev/raw/issue.md ] && [ -f "$CURRENT_ISSUE" ]; then
+              diff -u --label previous/issue.md --label current/issue.md \
+                prev/raw/issue.md "$CURRENT_ISSUE" > raw/issue-diff.patch
+              if [ $? -gt 1 ]; then rm -f raw/issue-diff.patch; fi
+            fi
+          fi
+
+          if [ -n "$PREV_PKG" ] && node factory/judge/calibration-judge.js collect raw \
+            --inputs "$INPUTS" --out meta/current-pkg > meta/current-collect.log; then
+            node factory/judge/calibration-judge.js compare --current meta/current-pkg \
+              --previous "$PREV_PKG" --inputs "$INPUTS" --out raw/round-compare.json || rm -f raw/round-compare.json
+          fi
+          COMPARE_ARGS=()
+          if [ -f raw/round-compare.json ]; then COMPARE_ARGS=(--compare raw/round-compare.json); fi
+          if [ -n "$PREV_TRANSITIONS" ]; then
+            node factory/judge/calibration-judge.js transitions --current raw \
+              --previous "$PREV_TRANSITIONS" "${COMPARE_ARGS[@]}" --out raw/round-transitions.json \
+              || rm -f raw/round-transitions.json
+          fi
+          for FILE in previous-round.json round-compare.json round-transitions.json; do
+            if [ -f "raw/$FILE" ]; then cp "raw/$FILE" pkg/context/; fi
+          done
+
+      - name: Collect packages
+        id: pkg
+        if: steps.previous.outcome == 'success'
+        env:
+          HISTORICAL_COMMENT: ${{ steps.raw.outputs.historical_comment }}
+        run: |
+          set -uo pipefail
+          if node factory/judge/calibration-judge.js collect raw \
+            --inputs factory/judge/inputs.json --out pkg > meta/collect.log; then
+            echo "collected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "collected=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Inputs could not be collected; the analysis will report a manifest error"
+          fi
+          if [ "$HISTORICAL_COMMENT" = "false" ] && [ -f pkg/manifest.json ]; then
+            jq 'if .inputs.verifierComment then .inputs.verifierComment.historical = false else . end' pkg/manifest.json > meta/manifest.json
+            mv meta/manifest.json pkg/manifest.json
+          fi
+
+      # Runs before any model step; a rejected model skips both stages and the analysis is
+      # published as an error. The reason travels in a file, never through the shell. The
+      # verifier model comes from the round's provenance; the current VERIFIER_MODEL is used
+      # only when the provenance records none, and the manifest then says it is not historical.
+      - name: Check judge model
+        id: model
+        if: steps.pkg.outcome == 'success'
+        env:
+          JUDGE_MODEL: ${{ inputs.judge-model }}
+          VERIFIER_MODEL_VAR: ${{ inputs.verifier-model }}
+          COLLECTED: ${{ steps.pkg.outputs.collected }}
+        run: |
+          set -uo pipefail
+          mkdir -p pkg
+          VERIFIER_MODEL=$(jq -r '.model // empty' raw/provenance.json 2>/dev/null || true)
+          if [ -z "$VERIFIER_MODEL" ]; then
+            VERIFIER_MODEL="$VERIFIER_MODEL_VAR"
+            if [ -f pkg/manifest.json ]; then
+              jq '.verifier_model_historical = false' pkg/manifest.json > meta/manifest.json
+              mv meta/manifest.json pkg/manifest.json
+            fi
+            echo "- verifier model: current setting, not historical" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if node factory/judge/calibration-judge.js check-model "$JUDGE_MODEL" \
+            --verifier-model "$VERIFIER_MODEL" \
+            --allowlist trusted/.github/calibration/allowed-models.json 2> pkg/model-error.txt; then
+            rm -f pkg/model-error.txt
+            ALLOWED="$COLLECTED"
+          else
+            ALLOWED=false
+          fi
+          echo "allowed=$ALLOWED" >> "$GITHUB_OUTPUT"
+          echo "- judge model allowed: $ALLOWED" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload independent package
+        if: steps.pkg.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-independent
+          include-hidden-files: true
+          path: pkg/independent/
+          if-no-files-found: ignore
+
+      - name: Upload full package
+        if: steps.pkg.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-full
+          include-hidden-files: true
+          path: |
+            pkg/full/
+            pkg/manifest.json
+          if-no-files-found: ignore
+
+      # Uploaded even after a failed step, so `assemble` can report what is missing.
+      - name: Upload round metadata
+        if: always() && steps.pkg.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-meta
+          path: |
+            pkg/manifest.json
+            pkg/model-error.txt
+            pkg/context/
+          if-no-files-found: ignore
+
+      # The state the later jobs act on. An expected failure of an automatic run (the inputs of
+      # the round) ended its step without failing the job; it is made visible here and handed on
+      # as an output. The analysis of the round then reports the error, when the pull request is
+      # known; before that there is nothing to publish to and the log is the record.
+      - name: Record collection state
+        id: state
+        if: always()
+        env:
+          TARGET: ${{ steps.target.outcome }}
+          TARGET_SKIP: ${{ steps.target.outputs.skip }}
+          ROUND: ${{ steps.round.outcome }}
+          ROUND_SKIP: ${{ steps.round.outputs.skip }}
+          ARTIFACTS: ${{ steps.artifacts.outcome }}
+          PR: ${{ steps.pr.outcome }}
+          PR_SKIP: ${{ steps.pr.outputs.skip }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          SNAPSHOT: ${{ steps.snapshot.outcome }}
+          RAW: ${{ steps.raw.outcome }}
+          PREVIOUS: ${{ steps.previous.outcome }}
+        run: |
+          set -uo pipefail
+          FAILED=false
+          REASON=""
+          for ENTRY in "label lookup:$TARGET" "round lookup:$ROUND" "round artifacts:$ARTIFACTS" \
+            "pull request check:$PR" "policy snapshot:$SNAPSHOT" "raw inputs:$RAW" "previous round:$PREVIOUS"; do
+            if [ "${ENTRY##*:}" = "failure" ]; then
+              FAILED=true
+              REASON="${ENTRY%%:*} failed"
+              break
+            fi
+          done
+          SKIP=false
+          if [ "$TARGET_SKIP" = "true" ] || [ "$ROUND_SKIP" = "true" ] || [ "$PR_SKIP" = "true" ]; then SKIP=true; fi
+          if [ "$FAILED" = "false" ] && [ "$PR_SKIP" != "false" ]; then SKIP=true; fi
+          if [ "$FAILED" = "true" ]; then
+            SKIP=false
+            echo "::error::Calibration Judge could not collect the inputs of the round: $REASON"
+            echo "- inputs of the round could not be collected: $REASON" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo "skip=$SKIP"
+            echo "failed=$FAILED"
+            echo "failure_reason=$REASON"
+            echo "pr_number=$PR_NUMBER"
+          } >> "$GITHUB_OUTPUT"
+
+  stage1:
+    name: Stage 1
+    needs: collect
+    if: needs.collect.outputs.skip == 'false' && needs.collect.outputs.failed != 'true' && needs.collect.outputs.model_allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      has_result: ${{ steps.result.outputs.has_result }}
+    steps:
+      - name: Checkout pull request head (data only)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.collect.outputs.head_sha }}
+          persist-credentials: false
+
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .github/calibration
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Anything the PR committed under these names is removed first, so the PR cannot supply
+      # its own package, prompt, schema or result.
+      - name: Clear Judge paths
+        run: rm -rf calibration-input calibration-prompt.md calibration-schema.json stage1-result.json
+
+      # Only the independent package: stage 1 must not see any verifier output.
+      - name: Download independent package
+        uses: actions/download-artifact@v4
+        with:
+          name: judge-independent
+          path: calibration-input
+
+      - name: Build prompt and schema
+        run: |
+          set -euo pipefail
+          node factory/judge/calibration-judge.js schema factory/judge/independent.schema.json \
+            --taxonomy trusted/.github/calibration/taxonomy.json --out calibration-schema.json
+          {
+            cat factory/judge/prompt-stage1.md
+            echo
+            echo "The stage-1 input package directory is ./calibration-input/ in the repository checkout."
+          } > calibration-prompt.md
+
+      # Same pin and Codex CLI as the verifier; read the pin comment in acceptance-verifier.yml
+      # before changing it. A failed or timed-out model call is absorbed here, like `Run
+      # verifier` in the verifier: this job does not fail, the steps below record that there is
+      # no result, and `assemble` reports an analysis error for the stage. Judge is never a
+      # required check.
+      - name: Run Calibration Judge (stage 1)
+        id: codex
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: calibration-prompt.md
+          output-schema-file: calibration-schema.json
+          output-file: stage1-result.json
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-version: ${{ env.CODEX_VERSION }}
+          model: ${{ inputs.judge-model }}
+          effort: high
+
+      - name: Record stage 1 result
+        id: result
+        if: always()
+        env:
+          CODEX_OUTCOME: ${{ steps.codex.outcome }}
+        run: |
+          if [ "$CODEX_OUTCOME" = "success" ] && [ -f stage1-result.json ]; then
+            echo "has_result=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_result=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Stage 1 produced no result (model step: $CODEX_OUTCOME)"
+            echo "- stage 1: no result (model step: $CODEX_OUTCOME)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload stage 1 result
+        if: always() && steps.result.outputs.has_result == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-stage1
+          path: stage1-result.json
+          if-no-files-found: ignore
+
+  stage2:
+    name: Stage 2
+    needs: [collect, stage1]
+    if: always() && needs.collect.outputs.skip == 'false' && needs.collect.outputs.failed != 'true' && needs.collect.outputs.model_allowed == 'true' && needs.stage1.outputs.has_result == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pull request head (data only)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.collect.outputs.head_sha }}
+          persist-credentials: false
+
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .github/calibration
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Clear Judge paths
+        run: rm -rf calibration-input stage1-download calibration-prompt.md calibration-schema.json stage2-analysis.json
+
+      - name: Download full package
+        uses: actions/download-artifact@v4
+        with:
+          name: judge-full
+          path: calibration-input
+
+      # The stage 1 result arrives only as an artifact and is read, never rewritten: stage 2
+      # writes its own stage2-analysis.json.
+      - name: Download stage 1 result
+        uses: actions/download-artifact@v4
+        with:
+          name: judge-stage1
+          path: stage1-download
+
+      - name: Build prompt and schema
+        run: |
+          set -euo pipefail
+          cp -R calibration-input/full/. calibration-input/
+          rm -rf calibration-input/full
+          cp stage1-download/stage1-result.json calibration-input/stage1-result.json
+          rm -rf stage1-download
+          node factory/judge/calibration-judge.js schema factory/judge/analysis.schema.json \
+            --taxonomy trusted/.github/calibration/taxonomy.json --out calibration-schema.json
+          {
+            cat factory/judge/prompt-stage2.md
+            echo
+            echo "The stage-2 input package directory is ./calibration-input/ in the repository checkout;"
+            echo "stage1-result.json and manifest.json are in that directory."
+          } > calibration-prompt.md
+
+      # Same pin and Codex CLI as the verifier; see the comment on stage 1. A failed model call
+      # is absorbed here and `assemble` reports the missing result.
+      - name: Run Calibration Judge (stage 2)
+        id: codex
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: calibration-prompt.md
+          output-schema-file: calibration-schema.json
+          output-file: stage2-analysis.json
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-version: ${{ env.CODEX_VERSION }}
+          model: ${{ inputs.judge-model }}
+          effort: high
+
+      - name: Record stage 2 result
+        if: always()
+        env:
+          CODEX_OUTCOME: ${{ steps.codex.outcome }}
+        run: |
+          if [ "$CODEX_OUTCOME" != "success" ]; then
+            echo "::warning::Stage 2 produced no usable result (model step: $CODEX_OUTCOME)"
+            echo "- stage 2: no usable result (model step: $CODEX_OUTCOME)" >> "$GITHUB_STEP_SUMMARY"
+            rm -f stage2-analysis.json
+          fi
+
+      - name: Upload stage 2 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-stage2
+          path: stage2-analysis.json
+          if-no-files-found: ignore
+
+  # Builds and keeps this round's analysis outside the publication queue: even when a queued
+  # publication is cancelled (see `publish`), the analysis JSON stays as an artifact.
+  assemble:
+    name: Assemble analysis
+    needs: [collect, stage1, stage2]
+    if: always() && needs.collect.result == 'success' && needs.collect.outputs.skip == 'false' && needs.collect.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout trusted project files from the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          sparse-checkout: |
+            .github/calibration
+          persist-credentials: false
+
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Any of these artifacts may be absent (an earlier job failed or was skipped); a missing
+      # file is reported by `assemble` as an analysis error of its stage.
+      - name: Download round results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          for NAME in judge-meta judge-stage1 judge-stage2; do
+            if ! gh run download "$RUN_ID" --repo "$REPO" --name "$NAME" --dir .; then
+              echo "- artifact $NAME: absent" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      # Inputs that could not be collected and a rejected model are published as an analysis
+      # error naming the reason; a missing stage file becomes an analysis error of that stage
+      # (assemble), so every round gets a comment.
+      - name: Assemble analysis
+        env:
+          MODEL_ALLOWED: ${{ needs.collect.outputs.model_allowed }}
+          COLLECT_FAILED: ${{ needs.collect.outputs.failed }}
+          COLLECT_REASON: ${{ needs.collect.outputs.failure_reason }}
+        run: |
+          set -euo pipefail
+          ARGS=(--manifest manifest.json --stage1 stage1-result.json --stage2 stage2-analysis.json \
+            --taxonomy trusted/.github/calibration/taxonomy.json --out calibration-analysis.json \
+            --previous context/previous-round.json --compare context/round-compare.json \
+            --transitions context/round-transitions.json)
+          if [ "$COLLECT_FAILED" = "true" ]; then
+            ARGS+=(--input-error "inputs of the round could not be collected: ${COLLECT_REASON:-unknown step}")
+          elif [ "$MODEL_ALLOWED" != "true" ]; then
+            REASON=$(cat model-error.txt 2>/dev/null || true)
+            ARGS+=(--model-error "judge model is not allowed: ${REASON:-model was not checked}")
+          fi
+          node factory/judge/calibration-judge.js assemble "${ARGS[@]}"
+
+      - name: Upload analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration-analysis
+          path: calibration-analysis.json
+          retention-days: 90
+
+  publish:
+    name: Publish analysis
+    needs: [collect, assemble]
+    if: always() && needs.assemble.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # One publication per PR runs at a time, so two rounds never overwrite each other's record
+    # in the shared comment. GitHub keeps only one pending job per group: a newer round's
+    # publication cancels an older one that is still pending (never a running one). The
+    # cancelled round's analysis stays in the `calibration-analysis` artifact and can be
+    # republished by a manual run. This group reduces how often a genuine race (two Publish
+    # jobs writing at the same instant) happens; the `publish-round` CLI subcommand below is
+    # what actually tolerates one when it does — it rereads the comment immediately before
+    # every write and reverifies after, retrying a lost write instead of assuming this group
+    # alone makes concurrent writes impossible.
+    concurrency:
+      group: calibration-judge-publish-${{ needs.collect.outputs.pr_number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout factory at the wrapper SHA
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FACTORY_REPOSITORY }}
+          ref: ${{ inputs.factory-sha }}
+          path: factory
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download analysis
+        uses: actions/download-artifact@v4
+        with:
+          name: calibration-analysis
+
+      # Only a comment written by github-actions[bot] with the Judge marker is updated; the
+      # record of this round becomes a new revision and the other rounds are kept. The CLI
+      # itself rereads the comment via `gh api` immediately before every merge and write, then
+      # rereads again to verify the written revision actually landed, retrying (bounded) a
+      # write a concurrent run appears to have lost before giving up.
+      - name: Publish comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.collect.outputs.pr_number }}
+          RUN_ID: ${{ needs.collect.outputs.run_id }}
+          RUN_ATTEMPT: ${{ needs.collect.outputs.run_attempt }}
+        run: |
+          set -euo pipefail
+          node factory/judge/calibration-judge.js publish-round calibration-analysis.json \
+            --repository "$REPO" --pr "$PR_NUMBER" --author 'github-actions[bot]' \
+            --run-id "$RUN_ID" --run-attempt "$RUN_ATTEMPT" \
+            --inputs factory/judge/inputs.json

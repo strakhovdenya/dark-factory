@@ -71,6 +71,11 @@
           "description": "Label that marks an issue or PR as needing a human.",
           "type": "string",
           "minLength": 1
+        },
+        "calibration": {
+          "description": "Label that, set by an owner on an issue or its PR, asks Calibration Judge to analyse a failed verifier round. Required when judge.enabled is true.",
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -182,6 +187,18 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "judge": {
+      "description": "Calibration Judge, the optional observer that analyses failed Acceptance Verifier rounds. Off unless \"enabled\" is true; a disabled Judge needs no other fields. Judge only observes: it never changes a verdict, a status or a label.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Whether Judge runs in this project, in any way of starting it. Absent or false means off. When true, labels.calibration is required.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
     "ralph": {
       "description": "Ralph, the autonomous issue-executing agent. Off unless \"enabled\" is true; a disabled Ralph needs no other fields.",
       "type": "object",
@@ -213,6 +230,18 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "judge": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] } },
+        "required": ["judge"]
+      },
+      "then": {
+        "required": ["labels"],
+        "properties": { "labels": { "required": ["calibration"] } }
+      }
+    }
+  ],
   "$defs": {
     "command": {
       "description": "A command as an argument array (not a shell string) plus its working directory.",
