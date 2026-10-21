@@ -1,0 +1,7 @@
+{
+  "expected": "FAIL",
+  "expected_criterion_id": null,
+  "expected_reason_code": "out_of_scope_file",
+  "pair_of": "pass-case",
+  "mutation_kind": "out_of_scope_change"
+}

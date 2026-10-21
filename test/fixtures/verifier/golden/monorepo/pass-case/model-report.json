@@ -1,0 +1,66 @@
+{
+  "criteria": [
+    {
+      "id": "AC-1",
+      "text": "model text AC-1",
+      "status": "PASS",
+      "summary": "checked",
+      "refs": [
+        {
+          "path": "packages/storefront/cart.ts",
+          "line": 1,
+          "quote": "export const total",
+          "kind": "impl"
+        }
+      ]
+    },
+    {
+      "id": "TR-1",
+      "text": "model text TR-1",
+      "status": "PASS",
+      "summary": "checked",
+      "refs": [
+        {
+          "path": "packages/storefront/cart.ts",
+          "line": 1,
+          "quote": "export const total",
+          "kind": "impl"
+        }
+      ]
+    },
+    {
+      "id": "DOD-1",
+      "text": "model text DOD-1",
+      "status": "PASS",
+      "summary": "checked",
+      "refs": [
+        {
+          "path": "packages/storefront/cart.ts",
+          "line": 1,
+          "quote": "export const total",
+          "kind": "impl"
+        }
+      ]
+    }
+  ],
+  "invariants": [
+    {
+      "id": "INV-1",
+      "status": "PASS",
+      "summary": "checked",
+      "refs": [
+        {
+          "path": "packages/storefront/cart.ts",
+          "line": 1,
+          "quote": "export const total",
+          "kind": "impl"
+        }
+      ]
+    }
+  ],
+  "test_tampering": [],
+  "risk_zones": [
+    "none"
+  ],
+  "out_of_scope_files": []
+}

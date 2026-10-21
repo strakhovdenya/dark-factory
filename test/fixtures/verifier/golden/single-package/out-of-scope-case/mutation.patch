@@ -1,0 +1,6 @@
+diff --git a/lib/unrelated.js b/lib/unrelated.js
+--- a/lib/unrelated.js
++++ b/lib/unrelated.js
+@@ -1 +1 @@
+-export const unrelated = 1;
++export const unrelated = 2;
