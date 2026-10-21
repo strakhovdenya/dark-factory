@@ -20,6 +20,11 @@
       "type": "integer",
       "minimum": 1
     },
+    "install": {
+      "description": "Project-level dependency installation steps, run in a fresh clone once and in order before the installation steps of any app. Same command contract as apps[].install (argv array, no shell; cwd relative to the project root). Optional; absent or empty means no steps and nothing is added implicitly. The token {file} is a literal here, never substituted.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/command" }
+    },
     "apps": {
       "description": "Application layout of the project. A single-package project lists one app with path \".\"; a monorepo lists one app per package.",
       "type": "array",
@@ -116,10 +121,10 @@
             "minLength": 1
           },
           "extensions": {
-            "description": "File extensions (with the leading dot) that the entry applies to.",
+            "description": "File extensions that the entry applies to, each with the leading dot. Plain (\".ts\") and compound (\".test.ts\", \".d.ts\") extensions are accepted; every segment after a dot is non-empty and contains no whitespace, \"/\" or backslash. An extension is matched as a suffix of the file name.",
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string", "pattern": "^\\.[^.\\s]+$" }
+            "items": { "type": "string", "pattern": "^(\\.[^.\\s/\\\\]+)+$" }
           },
           "label": {
             "description": "Human-readable label of the entry, shown in hook messages.",
@@ -166,17 +171,17 @@
       }
     },
     "hooks": {
-      "description": "Commands of the lint and typecheck hooks. A hook is inactive for paths that no entry matches.",
+      "description": "Commands of the lint and typecheck hooks. A hook is inactive for paths that no entry matches. The event of a hook is bound to a changed file; the entry command may check that one file (pass it with the {file} token) or the whole project (omit the token).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "lint": {
-          "description": "Lint command per path.",
+          "description": "Lint commands per path. On a changed file the hook runs every entry whose paths match the file (at least one pattern matches), in array order, each entry once however many of its patterns match. A failing or missing binary of one command is recorded in diagnostics and does not stop the following ones; the lint hook itself always exits 0. {file} in command.argv is substituted as described in hookCommand.",
           "type": "array",
           "items": { "$ref": "#/$defs/hookCommand" }
         },
         "typecheck": {
-          "description": "Typecheck command per path.",
+          "description": "Typecheck commands per path. Selection and execution are the same as for hooks.lint: every entry that matches the changed file, in array order, once each; a failure of one command is recorded in diagnostics and does not stop the following ones; the typecheck hook always exits 0. {file} in command.argv is substituted as described in hookCommand.",
           "type": "array",
           "items": { "$ref": "#/$defs/hookCommand" }
         }
@@ -214,6 +219,11 @@
           "type": "integer",
           "minimum": 1
         },
+        "humanNeededVerdict": {
+          "description": "Name of the verdict with which the Ralph agent reports that a human decision is needed (for example BLOCKED-<REASON>). Optional; absent means none is configured and nothing is assumed. A non-empty string without whitespace (a trailing newline included) and without a colon; it must not be a service token (DONE, BLOCKED, TYPE, SUMMARY, REVIEW, CODEREVIEW). Regex characters are allowed and are interpreted literally by the reader. It is not the label labels.humanNeeded and not the verifier status check verifier.verdictCheckName.",
+          "type": "string",
+          "pattern": "^(?!(?:DONE|BLOCKED|TYPE|SUMMARY|REVIEW|CODEREVIEW)$)[^\\s:]+$"
+        },
         "enabledSteps": {
           "description": "Names of optional Ralph steps switched on for this project. Steps not listed stay off. Required (may be empty) when Ralph is enabled.",
           "type": "array",
@@ -244,7 +254,7 @@
   ],
   "$defs": {
     "command": {
-      "description": "A command as an argument array (not a shell string) plus its working directory.",
+      "description": "A command as an argument array (not a shell string) plus its working directory. The strings are passed as they are: the token {file} is substituted only inside hooks.lint[].command.argv and hooks.typecheck[].command.argv (see hookCommand); in install and gate commands it is a plain literal.",
       "type": "object",
       "additionalProperties": false,
       "required": ["argv", "cwd"],
@@ -263,7 +273,7 @@
       }
     },
     "hookCommand": {
-      "description": "A hook command bound to the paths it applies to.",
+      "description": "A hook command bound to the paths it applies to. paths are glob expressions with minimatch semantics (*, ** and {a,b}), relative to the project root and written with \"/\"; the changed file path is made relative with \"/\" before matching. ** matches zero or more directories, so **/*.ts also matches x.ts in the root. Options: dot true, nocase false, matchBase false, nonegate true, nocomment true; braces and globstar stay enabled. A file outside the project root matches no entry. In command.argv the optional token {file} is replaced, in every occurrence in every string element (also inside a longer element such as --file={file}), by the absolute path of the changed file inside the project root, the same for any cwd. The result stays one argument: no shell, no extra quoting, no interpretation of path characters. cwd and other fields are not interpolated. Without the token the command runs with its arguments unchanged.",
       "type": "object",
       "additionalProperties": false,
       "required": ["paths", "command"],

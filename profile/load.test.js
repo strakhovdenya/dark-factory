@@ -183,3 +183,141 @@ test('validates judge settings in both fixture profiles', (t) => {
     assert.throws(() => loadProfile(profileCopy(t, fixture, unknownField)), /judge\.label: unknown field/);
   }
 });
+
+const ENABLED_RALPH = { enabled: true, techDebtTrackerIssue: 1, enabledSteps: [] };
+const withRalph = (extra = {}) => (profile) => {
+  profile.ralph = { ...ENABLED_RALPH, ...extra };
+};
+
+test('skill rule accepts compound extension', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  for (const fixture of FIXTURE_PROFILES) {
+    const extensions = ['.ts', '.test.ts', '.d.ts'];
+    const root = profileCopy(t, fixture, (profile) => {
+      profile.skillRules = [{ path: '.', extensions, label: 'x', skills: ['s'] }];
+    });
+    assert.deepEqual(loadProfile(root).skillRules[0].extensions, extensions, fixture);
+  }
+});
+
+test('rejects malformed skill rule extensions', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const bad = ['ts', '', '.', '.test.', '..ts', '.a..b', '.ts.', '. ts', '.ts\n', '.a b', '.a/b', '.a\\b', '/.ts'];
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const extension of bad) {
+      const root = profileCopy(t, fixture, (profile) => {
+        profile.skillRules = [{ path: '.', extensions: ['.ts', extension], label: 'x', skills: ['s'] }];
+      });
+      assert.throws(
+        () => loadProfile(root),
+        /skillRules\[0\]\.extensions\[1\]/,
+        `${fixture}: ${JSON.stringify(extension)}`,
+      );
+    }
+  }
+});
+
+test('project install uses shared command contract', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const install = [
+    { argv: ['npm', 'install', '--ignore-scripts'], cwd: '.' },
+    { argv: ['node', 'scripts/prepare.js'], cwd: 'tools' },
+  ];
+  for (const fixture of FIXTURE_PROFILES) {
+    const root = profileCopy(t, fixture, (profile) => {
+      profile.install = install;
+    });
+    assert.deepEqual(loadProfile(root).install, install, fixture);
+  }
+});
+
+test('project install is optional without implicit commands', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  for (const fixture of FIXTURE_PROFILES) {
+    assert.equal(loadProfile(profileCopy(t, fixture)).install, undefined, fixture);
+    const root = profileCopy(t, fixture, (profile) => {
+      profile.install = [];
+    });
+    assert.deepEqual(loadProfile(root).install, [], fixture);
+  }
+});
+
+test('rejects invalid project install command', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const cases = [
+    [{ argv: [], cwd: '.' }, /install\[1\]\.argv/],
+    [{ argv: ['npm', 'install'] }, /install\[1\]\.cwd/],
+  ];
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const [command, pattern] of cases) {
+      const root = profileCopy(t, fixture, (profile) => {
+        profile.install = [{ argv: ['npm', 'install'], cwd: '.' }, command];
+      });
+      assert.throws(() => loadProfile(root), pattern, fixture);
+    }
+  }
+});
+
+test('new fields are optional', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const ralph of [{ enabled: false }, ENABLED_RALPH]) {
+      const root = profileCopy(t, fixture, (profile) => {
+        profile.ralph = ralph;
+      });
+      const profile = loadProfile(root);
+      assert.deepEqual(profile.ralph, ralph, fixture);
+      assert.equal(profile.install, undefined, fixture);
+      assert.equal(profile.hooks, undefined, fixture);
+    }
+  }
+});
+
+test('validates human needed verdict token', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const rejected = ['', 'a b', 'A:B', 'A\n', 'BLOCKED-X\n', ' X', 5, null, 'DONE', 'BLOCKED', 'TYPE', 'SUMMARY', 'REVIEW', 'CODEREVIEW'];
+  const accepted = ['BLOCKED-PROMPT-CHANGE', 'BLOCKED-.*', 'BLOCKED-[A-Z]+|X', 'DONE-1', 'blocked', 'TYPES'];
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const value of rejected) {
+      const root = profileCopy(t, fixture, withRalph({ humanNeededVerdict: value }));
+      assert.throws(() => loadProfile(root), /ralph\.humanNeededVerdict/, `${fixture}: ${JSON.stringify(value)}`);
+    }
+    for (const value of accepted) {
+      const root = profileCopy(t, fixture, withRalph({ humanNeededVerdict: value }));
+      assert.equal(loadProfile(root).ralph.humanNeededVerdict, value, `${fixture}: ${value}`);
+    }
+  }
+});
+
+test('keeps file token literal outside hooks', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const command = { argv: ['tool', '--file={file}', '{file}'], cwd: '.' };
+  for (const fixture of FIXTURE_PROFILES) {
+    const root = profileCopy(t, fixture, (profile) => {
+      profile.install = [command];
+      profile.apps[0].install = [command];
+      profile.apps[0].gate = [command];
+    });
+    const profile = loadProfile(root);
+    assert.deepEqual(profile.install, [command], fixture);
+    assert.deepEqual(profile.apps[0].install, [command], fixture);
+    assert.deepEqual(profile.apps[0].gate, [command], fixture);
+  }
+});
+
+test('loads extended settings in both fixture profiles', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const hooks = {
+    lint: [{ paths: ['**/*.{ts,tsx}'], command: { argv: ['lint', '--file={file}', '{file}'], cwd: '.' } }],
+    typecheck: [{ paths: ['**/*.ts'], command: { argv: ['tsc', '--noEmit'], cwd: '.' } }],
+  };
+  for (const fixture of FIXTURE_PROFILES) {
+    const root = profileCopy(t, fixture, (profile) => {
+      withRalph({ humanNeededVerdict: 'BLOCKED-X' })(profile);
+      profile.hooks = hooks;
+    });
+    const profile = loadProfile(root);
+    assert.equal(profile.ralph.humanNeededVerdict, 'BLOCKED-X', fixture);
+    assert.deepEqual(profile.hooks, hooks, fixture);
+  }
+});

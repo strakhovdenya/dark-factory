@@ -96,3 +96,53 @@ test('fixture profiles do not name consumer projects', () => {
     }
   }
 });
+
+test('example profiles keep blocking verdict', () => {
+  assert.equal(loadProfile(jobflowRoot).ralph.humanNeededVerdict, 'BLOCKED-PROMPT-CHANGE');
+  assert.equal(loadProfile(cardsRoot).ralph.humanNeededVerdict, 'BLOCKED-DB-CHANGE');
+});
+
+test('jobflow root install is a project-level step', () => {
+  const profile = loadProfile(jobflowRoot);
+  assert.deepEqual(profile.install, [{ argv: ['npm', 'install', '--ignore-scripts'], cwd: '.' }]);
+  assert.deepEqual(
+    profile.apps.map((app) => app.install),
+    [
+      [{ argv: ['npm', 'install'], cwd: 'apps/api' }],
+      [{ argv: ['npm', 'install'], cwd: 'apps/web' }],
+    ],
+  );
+});
+
+test('cards vitest rule targets test files', () => {
+  const rules = loadProfile(cardsRoot).skillRules.filter((rule) => rule.skills.includes('vitest'));
+  assert.equal(rules.length, 1);
+  assert.equal(rules[0].path, 'src');
+  assert.deepEqual(rules[0].extensions, ['.test.ts']);
+});
+
+test('example hook commands preserve source behaviour', () => {
+  const node = (bin, ...args) => ['node', `node_modules/${bin}`, ...args];
+  const eslint = (cwd) => ({
+    paths: [`${cwd}/**/*.{ts,tsx}`],
+    command: { argv: node('eslint/bin/eslint.js', '--fix', '{file}'), cwd },
+  });
+  const tsc = (cwd) => ({
+    paths: [`${cwd}/**/*.{ts,tsx}`],
+    command: { argv: node('typescript/bin/tsc', '--noEmit'), cwd },
+  });
+  assert.deepEqual(loadProfile(jobflowRoot).hooks, {
+    lint: [eslint('apps/api'), eslint('apps/web')],
+    typecheck: [tsc('apps/api'), tsc('apps/web')],
+  });
+  const sources = ['**/*.{ts,tsx,js,jsx}'];
+  assert.deepEqual(loadProfile(cardsRoot).hooks, {
+    lint: [
+      { paths: sources, command: { argv: node('prettier/bin/prettier.cjs', '--write', '{file}'), cwd: '.' } },
+      { paths: sources, command: { argv: node('eslint/bin/eslint.js', '--fix', '{file}'), cwd: '.' } },
+    ],
+    typecheck: [
+      { paths: ['**/*.{ts,tsx}'], command: { argv: node('typescript/bin/tsc', '--noEmit'), cwd: '.' } },
+    ],
+  });
+});

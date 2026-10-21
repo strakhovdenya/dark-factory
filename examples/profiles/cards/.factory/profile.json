@@ -20,17 +20,26 @@
   "skillRules": [
     {
       "path": "src",
-      "extensions": [".ts", ".tsx"],
+      "extensions": [".test.ts"],
       "label": "tests (vitest)",
       "skills": ["vitest"]
     }
   ],
   "ruleFiles": ["CLAUDE.md"],
   "docs": { "prd": "project-management/prd", "plans": "project-management/plan" },
+  "hooks": {
+    "lint": [
+      { "paths": ["**/*.{ts,tsx,js,jsx}"], "command": { "argv": ["node", "node_modules/prettier/bin/prettier.cjs", "--write", "{file}"], "cwd": "." } },
+      { "paths": ["**/*.{ts,tsx,js,jsx}"], "command": { "argv": ["node", "node_modules/eslint/bin/eslint.js", "--fix", "{file}"], "cwd": "." } }
+    ],
+    "typecheck": [
+      { "paths": ["**/*.{ts,tsx}"], "command": { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "." } }
+    ]
+  },
   "agentEnvironment": [
     "No running next dev server; starting a dev server in the background is forbidden.",
     "No access to the real Supabase (neither database nor auth).",
     "No browser and no Playwright tools."
   ],
-  "ralph": { "enabled": true, "techDebtTrackerIssue": 1, "enabledSteps": [] }
+  "ralph": { "enabled": true, "techDebtTrackerIssue": 1, "enabledSteps": [], "humanNeededVerdict": "BLOCKED-DB-CHANGE" }
 }

@@ -1,12 +1,12 @@
 {
   "branchTemplate": "task/ISSUE-{issue}-{slug}",
   "githubProject": 1,
+  "install": [{ "argv": ["npm", "install", "--ignore-scripts"], "cwd": "." }],
   "apps": [
     {
       "name": "api",
       "path": "apps/api",
       "install": [
-        { "argv": ["npm", "install", "--ignore-scripts"], "cwd": "." },
         { "argv": ["npm", "install"], "cwd": "apps/api" }
       ],
       "gate": [
@@ -70,10 +70,20 @@
   ],
   "ruleFiles": ["CLAUDE.md", "apps/api/CLAUDE.md", "apps/web/CLAUDE.md"],
   "docs": { "prd": "project-management/prd", "plans": "project-management/plan" },
+  "hooks": {
+    "lint": [
+      { "paths": ["apps/api/**/*.{ts,tsx}"], "command": { "argv": ["node", "node_modules/eslint/bin/eslint.js", "--fix", "{file}"], "cwd": "apps/api" } },
+      { "paths": ["apps/web/**/*.{ts,tsx}"], "command": { "argv": ["node", "node_modules/eslint/bin/eslint.js", "--fix", "{file}"], "cwd": "apps/web" } }
+    ],
+    "typecheck": [
+      { "paths": ["apps/api/**/*.{ts,tsx}"], "command": { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "apps/api" } },
+      { "paths": ["apps/web/**/*.{ts,tsx}"], "command": { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "apps/web" } }
+    ]
+  },
   "agentEnvironment": [
     "No docker.",
     "No real Postgres database.",
     "No running apps/api or apps/web server; starting a dev server in the background is forbidden."
   ],
-  "ralph": { "enabled": true, "techDebtTrackerIssue": 334, "enabledSteps": [] }
+  "ralph": { "enabled": true, "techDebtTrackerIssue": 334, "enabledSteps": [], "humanNeededVerdict": "BLOCKED-PROMPT-CHANGE" }
 }
