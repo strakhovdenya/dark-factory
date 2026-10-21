@@ -1,0 +1,7 @@
+{
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "issue_body_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "verifier_commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "model": "fixture-model",
+  "codex_version": "fixture-codex-version"
+}

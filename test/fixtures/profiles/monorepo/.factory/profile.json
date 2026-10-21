@@ -25,7 +25,7 @@
   "protectedPaths": [".github/", "scripts/", "packages/billing/migrations/"],
   "labels": { "humanNeeded": "needs-human" },
   "verifier": {
-    "goldenDir": "verification/golden",
+    "goldenDir": "../../verifier/golden/monorepo",
     "checks": ["spec-approval", "affects-scope", "computed-items", "test-tampering-scan", "references", "ci-checks", "allowed-model"]
   },
   "skillRules": [
