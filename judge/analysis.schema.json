@@ -1,0 +1,164 @@
+{
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "note", "sha", "path", "ref"],
+      "properties": {
+        "type": { "type": "string", "enum": ["code", "input", "log"] },
+        "note": { "type": "string" },
+        "sha": { "type": ["string", "null"] },
+        "path": { "type": ["string", "null"] },
+        "ref": { "type": ["string", "null"] }
+      }
+    },
+    "evidenceList": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "checkSource": {
+      "anyOf": [{ "type": "null" }, { "$taxonomy": "check_source" }]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "observed_verdict",
+    "independent_expected_verdict",
+    "primary_cause",
+    "responsibility",
+    "confidence",
+    "issue_defects",
+    "implementation_defects",
+    "verifier_defects",
+    "correct_verifier_findings",
+    "counterfactual",
+    "systemic_lessons",
+    "golden_case_recommendation"
+  ],
+  "properties": {
+    "observed_verdict": { "$taxonomy": "verdict" },
+    "independent_expected_verdict": { "$taxonomy": "verdict" },
+    "primary_cause": { "$taxonomy": "primary_cause" },
+    "responsibility": { "$taxonomy": "responsibility" },
+    "confidence": { "$taxonomy": "confidence" },
+    "issue_defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "criterion_id",
+          "fate",
+          "subtype",
+          "check_source",
+          "description",
+          "evidence"
+        ],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "criterion_id": { "type": ["string", "null"] },
+          "fate": { "$taxonomy": "defect_fate" },
+          "subtype": { "$taxonomy": "issue_defect_subtype" },
+          "check_source": { "$ref": "#/$defs/checkSource" },
+          "description": { "type": "string" },
+          "evidence": { "$ref": "#/$defs/evidenceList" }
+        }
+      }
+    },
+    "implementation_defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "criterion_id",
+          "fate",
+          "check_source",
+          "description",
+          "evidence"
+        ],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "criterion_id": { "type": ["string", "null"] },
+          "fate": { "$taxonomy": "defect_fate" },
+          "check_source": { "$ref": "#/$defs/checkSource" },
+          "description": { "type": "string" },
+          "evidence": { "$ref": "#/$defs/evidenceList" }
+        }
+      }
+    },
+    "verifier_defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "criterion_id",
+          "fate",
+          "subtype",
+          "recommended_change_target",
+          "check_source",
+          "description",
+          "evidence"
+        ],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "criterion_id": { "type": ["string", "null"] },
+          "fate": { "$taxonomy": "defect_fate" },
+          "subtype": { "$taxonomy": "verifier_defect_subtype" },
+          "recommended_change_target": { "$taxonomy": "recommended_change_target" },
+          "check_source": { "$ref": "#/$defs/checkSource" },
+          "description": { "type": "string" },
+          "evidence": { "$ref": "#/$defs/evidenceList" }
+        }
+      }
+    },
+    "correct_verifier_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "criterion_id",
+          "fate",
+          "check_source",
+          "description",
+          "evidence"
+        ],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "criterion_id": { "type": ["string", "null"] },
+          "fate": { "$taxonomy": "defect_fate" },
+          "check_source": { "$ref": "#/$defs/checkSource" },
+          "description": { "type": "string" },
+          "evidence": { "$ref": "#/$defs/evidenceList" }
+        }
+      }
+    },
+    "counterfactual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fix_issue_only",
+        "fix_implementation_only",
+        "fix_verifier_only"
+      ],
+      "properties": {
+        "fix_issue_only": { "$taxonomy": "counterfactual_outcome" },
+        "fix_implementation_only": { "$taxonomy": "counterfactual_outcome" },
+        "fix_verifier_only": { "$taxonomy": "counterfactual_outcome" }
+      }
+    },
+    "systemic_lessons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "golden_case_recommendation": { "type": ["string", "null"] }
+  }
+}

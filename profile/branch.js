@@ -1,7 +1,5 @@
 'use strict';
 
-const { loadProfile } = require('./load');
-
 // Task branches are named by the profile's branchTemplate, for example
 // "task/ISSUE-{issue}-{slug}": {issue} is the issue number, {slug} any
 // non-empty text. Everything else in the template is literal text.
@@ -62,7 +60,7 @@ const main = (argv = process.argv.slice(2)) => {
     return 2;
   }
   try {
-    const issue = issueNumberOfBranch(loadProfile(args.project).branchTemplate, args.branch);
+    const issue = issueNumberOfBranch(require('./load').loadProfile(args.project).branchTemplate, args.branch);
     process.stdout.write(issue === null ? '' : `${issue}\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);

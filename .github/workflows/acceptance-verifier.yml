@@ -216,6 +216,7 @@ jobs:
       # mismatch fails the job after pr_number is set, so `Report` publishes
       # FAIL; nothing below runs scripts from an unverified checkout.
       - name: Check factory pin
+        id: pin
         if: steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
         env:
           FACTORY_SHA: ${{ inputs.factory-sha }}
@@ -394,6 +395,71 @@ jobs:
           if [ "$RESULT" != "true" ]; then RESULT=false; fi
           echo "needs_second_run=$RESULT" >> "$GITHUB_OUTPUT"
           echo "- needs second run: $RESULT" >> "$GITHUB_STEP_SUMMARY"
+
+      # Snapshot of the rules this round used, kept for Calibration Judge: the project's trusted
+      # settings as the checkout held them, the prompt and schema the model was given, and the
+      # issue contract with the project overlay. It is a diagnostic record, formed in every round
+      # and never part of the verdict: this step and the upload below cannot fail the job (a failed
+      # `Verify` makes `Report` discard every input and publish FAIL), nothing here is read by the
+      # verdict computation, and only a file this step formed in a fresh directory outside the PR
+      # checkout is uploaded. It runs only after the factory pin was confirmed.
+      - name: Form policy snapshot
+        id: snapshot
+        if: always() && steps.pin.outcome == 'success' && steps.collect.outputs.stale != 'true' && steps.collect.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          FACTORY_SHA: ${{ inputs.factory-sha }}
+          REQUESTED_REF: ${{ github.sha }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          CODEX_OUTCOME: ${{ steps.codex.outcome }}
+        run: |
+          set -uo pipefail
+          MODEL_RAN=false
+          if [ "$CODEX_OUTCOME" = "success" ] || [ "$CODEX_OUTCOME" = "failure" ]; then MODEL_RAN=true; fi
+          if ! SNAPSHOT_DIR=$(mktemp -d "$RUNNER_TEMP/policy-snapshot.XXXXXX"); then
+            echo "::warning::Policy snapshot was not formed: no directory for it"
+            echo "- policy snapshot: not formed (no directory)" >> "$GITHUB_STEP_SUMMARY"
+            echo "formed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if node factory/verifier/policy-snapshot.js write --project trusted \
+            --out "$SNAPSHOT_DIR/policy-snapshot.json" --factory-sha "$FACTORY_SHA" \
+            --requested-ref "$REQUESTED_REF" --head-sha "$HEAD_SHA" --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" --model-ran "$MODEL_RAN" \
+            --prompt "$RUNNER_TEMP/verifier/prompt.md" --schema "$RUNNER_TEMP/verifier/schema.json"; then
+            echo "formed=true" >> "$GITHUB_OUTPUT"
+            echo "file=$SNAPSHOT_DIR/policy-snapshot.json" >> "$GITHUB_OUTPUT"
+            echo "- policy snapshot: formed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Policy snapshot was not formed; the verdict is not affected"
+            echo "- policy snapshot: not formed" >> "$GITHUB_STEP_SUMMARY"
+            echo "formed=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload policy snapshot
+        id: snapshot_upload
+        if: always() && steps.snapshot.outputs.formed == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-snapshot
+          overwrite: true
+          path: ${{ steps.snapshot.outputs.file }}
+          if-no-files-found: warn
+
+      - name: Policy snapshot upload outcome
+        if: always() && steps.snapshot.outputs.formed == 'true'
+        continue-on-error: true
+        env:
+          UPLOAD_OUTCOME: ${{ steps.snapshot_upload.outcome }}
+        run: |
+          echo "- policy snapshot upload: $UPLOAD_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$UPLOAD_OUTCOME" != "success" ]; then
+            echo "::warning::Policy snapshot was formed but not uploaded; the verdict is not affected"
+          fi
 
       # .verifier/ carries the first run's inputs for `Verify second` (INV-8); it is a hidden
       # directory, which upload-artifact skips unless include-hidden-files is set.

@@ -36,7 +36,8 @@
     "apps/api/prisma/prompts/",
     "apps/api/knowledge-sources/"
   ],
-  "labels": { "humanNeeded": "ralph-needs-prompt-change" },
+  "labels": { "humanNeeded": "ralph-needs-prompt-change", "calibration": "calibrate" },
+  "judge": { "enabled": true },
   "verifier": {
     "goldenDir": ".github/verifier/golden",
     "checks": ["spec-approval", "affects-scope", "computed-items", "test-tampering-scan", "references", "ci-checks", "allowed-model"]

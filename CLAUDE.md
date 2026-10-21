@@ -12,13 +12,13 @@ This repo is developed by its owner in an interactive Claude Code session. Ralph
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/` | Package sources (the `files` field of `package.json`) | **yes** |
+| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/` | Package sources (the `files` field of `package.json`) | **yes** |
 | `.claude/` | Tooling for developing the factory only (its own scripts, settings, skills, agents) | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repo | no |
 
 Rules of placement:
-- Something a project must receive → package dirs (`skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`).
+- Something a project must receive → package dirs (`skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`).
 - Something only used while developing the factory → `.claude/`. Never put package sources there, and never let the factory's own skills/agents reach projects.
 - `.claude/` and `.factory/` are never part of the package.
 
@@ -33,7 +33,7 @@ Rules of placement:
 3. The verdict is computed by code, not by the model. An invalid profile or config → `FAIL`.
 4. The Ralph agent runs without git/gh; the controller does git and GitHub operations.
 5. Updating the core in a project happens only through a PR that changes the pinned version.
-6. A new step or check is wired in by registration + profile and is **off by default**.
+6. A new step or check is wired in by registration + profile and is **off by default**. The one exception is a mandatory diagnostic artifact of the round protocol, which has no switch. It adds no check, no model call and no authority, does not change the verdict, and a failure to form or publish it is isolated from the decision (it never fails the job that computes the verdict). The list is closed: `verdict-report` (job `Report`) and the policy snapshot (job `Verify`). `provenance.json` is not on it: it takes part in computing the verdict. A new artifact joins the list only by changing this paragraph.
 7. One "path → skills" table, shared by the hook and by Ralph.
 8. A project overlay can only add to the core (e.g. issue template sections), never remove or override.
 9. Installing the package does not modify tracked files of the project.
@@ -46,7 +46,7 @@ Rules of placement:
 
 Applies to a Ralph step, a verifier check, a hook, or a skill:
 
-1. The knob is declared in the **profile schema**; the element is **disabled by default**.
+1. The knob is declared in the **profile schema**; the element is **disabled by default**. The only exception is a mandatory diagnostic artifact of the round protocol from the closed list in invariant 6; it needs no knob, but it must meet every condition stated there.
 2. Tests cover **two fixture profiles**: "monorepo" and "single package". No test depends on one project's layout.
 3. If the element can influence the verifier verdict, run the **reference PR set** (cases with an expected verifier verdict) and confirm no verdict changes unexpectedly.
 4. Add an entry to `CHANGELOG`.

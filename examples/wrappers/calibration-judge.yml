@@ -1,0 +1,80 @@
+name: Calibration Judge
+
+# Project wrapper of the factory's reusable Calibration Judge, the optional observer that analyses
+# failed Acceptance Verifier rounds. Copy it to .github/workflows/calibration-judge.yml of the
+# project. A workflow in another repository cannot subscribe to this project's workflow_run,
+# labeled or manual events, so this short file stays in the project; everything else runs in the
+# factory.
+#
+# Off by default. Judge runs only when the project profile (.factory/profile.json on the default
+# branch) has `judge.enabled: true` and `labels.calibration`; without that every start, a manual
+# one included, ends as an ordinary skip. Judge only observes: it never changes a verdict, the
+# `Acceptance Verifier` status or a label.
+#
+# Pinning: replace the SHA below, in BOTH places, with the full commit SHA of the factory release
+# tag that package.json pins as the `dark-factory` dependency (`git rev-parse vX.Y.Z^{commit}` in
+# the factory). The factory checks that the tag on the default branch resolves to this SHA and
+# stops with a configuration error when they differ, so move both pins in one PR (together with
+# the pin of acceptance-verifier.yml).
+#
+# Ways to start it:
+# - the Acceptance Verifier workflow finished a round (workflow_run; the name below is the name
+#   of the verifier wrapper, examples/wrappers/acceptance-verifier.yml);
+# - an owner added the calibration label to the PR (pull_request_target) or to its Issue (issues);
+#   replace `main` with the default branch of the project;
+# - a manual run with a PR number and, optionally, a verifier run ID and attempt; start it on the
+#   default branch.
+# workflow_run and the labeled events always run this file from the default branch, so a PR
+# cannot change which Judge it starts.
+#
+# Project settings: variable CALIBRATION_JUDGE_MODEL (must be listed in
+# .github/calibration/allowed-models.json), variable VERIFIER_MODEL (used only when a round's
+# provenance records no model), secret OPENAI_API_KEY, the owners in
+# .github/verifier/owners.json and the taxonomy and allowed models in .github/calibration/ on the
+# default branch.
+
+on:
+  workflow_run:
+    workflows: [Acceptance Verifier]
+    types: [completed]
+  pull_request_target:
+    types: [labeled]
+    branches: [main]
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: string
+      run_id:
+        description: Acceptance Verifier run ID (default - latest round)
+        required: false
+        type: string
+      run_attempt:
+        description: Attempt of that run (default - latest round)
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  calibration-judge:
+    name: Calibration Judge
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: write
+      statuses: read
+    uses: strakhovdenya/dark-factory/.github/workflows/calibration-judge.yml@0123456789abcdef0123456789abcdef01234567
+    with:
+      factory-sha: 0123456789abcdef0123456789abcdef01234567
+      judge-model: ${{ vars.CALIBRATION_JUDGE_MODEL }}
+      verifier-model: ${{ vars.VERIFIER_MODEL }}
+      pr: ${{ inputs.pr }}
+      run-id: ${{ inputs.run_id }}
+      run-attempt: ${{ inputs.run_attempt }}
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

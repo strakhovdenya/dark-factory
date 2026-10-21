@@ -1,0 +1,240 @@
+{
+  "independentInputs": [
+    {
+      "key": "issue",
+      "path": "issue.md",
+      "fallbackPath": "issue-current.md",
+      "format": "text"
+    },
+    {
+      "key": "issueBody",
+      "path": "issue-body.md",
+      "format": "text"
+    },
+    {
+      "key": "specLint",
+      "path": "spec-lint.json",
+      "format": "json"
+    },
+    {
+      "key": "filesList",
+      "path": "files.txt",
+      "format": "text"
+    },
+    {
+      "key": "diff",
+      "path": "diff.patch",
+      "format": "text"
+    },
+    {
+      "key": "ci",
+      "path": "ci.json",
+      "format": "json"
+    },
+    {
+      "key": "scope",
+      "path": "scope.json",
+      "format": "json"
+    },
+    {
+      "key": "absence",
+      "path": "absence.json",
+      "format": "json"
+    },
+    {
+      "key": "tamperingScan",
+      "path": "tampering-scan-result.json",
+      "format": "json"
+    },
+    {
+      "key": "provenance",
+      "path": "provenance.json",
+      "format": "json"
+    }
+  ],
+  "fullOnlyInputs": [
+    {
+      "key": "policySnapshot",
+      "path": "policy-status.json",
+      "format": "json",
+      "statusField": "status"
+    },
+    {
+      "key": "specApproval",
+      "path": "spec-approval.json",
+      "format": "json"
+    },
+    {
+      "key": "verdict",
+      "path": "verdict.json",
+      "format": "json"
+    },
+    {
+      "key": "verdict2",
+      "path": "verdict2.json",
+      "format": "json"
+    },
+    {
+      "key": "refsProblems",
+      "path": "refs-problems.json",
+      "format": "json"
+    },
+    {
+      "key": "refsProblems2",
+      "path": "refs-problems2.json",
+      "format": "json"
+    },
+    {
+      "key": "refsNotes",
+      "path": "refs-notes.json",
+      "format": "json"
+    },
+    {
+      "key": "verifierComment",
+      "path": "verifier-comment.md",
+      "format": "text"
+    },
+    {
+      "key": "selfReport",
+      "selfReport": true,
+      "format": "text"
+    },
+    {
+      "key": "previousAnalysis",
+      "path": "previous-round.json",
+      "format": "json",
+      "statusField": "status"
+    },
+    {
+      "key": "previousManifest",
+      "path": "previous-manifest.json",
+      "format": "json"
+    },
+    {
+      "key": "headDiff",
+      "path": "head-diff.patch",
+      "format": "text"
+    },
+    {
+      "key": "issueDiff",
+      "path": "issue-diff.patch",
+      "format": "text"
+    },
+    {
+      "key": "policyDiff",
+      "path": "policy-diff.patch",
+      "format": "text"
+    },
+    {
+      "key": "roundCompare",
+      "path": "round-compare.json",
+      "format": "json"
+    },
+    {
+      "key": "roundTransitions",
+      "path": "round-transitions.json",
+      "format": "json"
+    }
+  ],
+  "trustedConfigs": [
+    "verifier/prompt.md",
+    "verifier/schema.json",
+    "verifier/issue-contract.json",
+    "verifier/issue-contract.overlay.json",
+    "project/profile.json",
+    "project/enabled-checks.json",
+    "project/risk-zones.json",
+    "project/owners.json",
+    "project/required-checks.json",
+    "project/allowed-models.json",
+    "project/tampering-scan.json"
+  ],
+  "trustedConfigsRoot": "trusted",
+  "policy": {
+    "statusFile": "policy-status.json",
+    "parts": {
+      "prompt": "verifier/prompt.md",
+      "schema": "verifier/schema.json",
+      "issue_contract": "verifier/issue-contract.json",
+      "issue_contract_overlay": "verifier/issue-contract.overlay.json",
+      "profile": "project/profile.json",
+      "enabled_checks": "project/enabled-checks.json",
+      "risk_zones": "project/risk-zones.json",
+      "owners": "project/owners.json",
+      "required_checks": "project/required-checks.json",
+      "verifier_allowed_models": "project/allowed-models.json",
+      "tampering_config": "project/tampering-scan.json"
+    }
+  },
+  "roundMeta": {
+    "runFile": "run.json",
+    "jobsFile": "jobs.json",
+    "prFile": "pr.json",
+    "verifyJobName": "Verify",
+    "reportJobName": "Report"
+  },
+  "selfReportMarker": "Agent-reported DONE — self-reported by the autonomous agent, not independently re-verified by the controller.",
+  "selfReportCommentsFile": "pr-comments.json",
+  "comment": {
+    "maxBodyLength": 65536
+  },
+  "fingerprint": {
+    "significantInputs": [
+      {
+        "key": "baseSha",
+        "manifestField": "base_sha"
+      },
+      {
+        "key": "verifierCommit",
+        "manifestField": "verifier_commit",
+        "statusKey": "provenance"
+      },
+      {
+        "key": "model",
+        "manifestField": "model",
+        "statusKey": "provenance"
+      },
+      {
+        "key": "codexVersion",
+        "manifestField": "codex_version",
+        "statusKey": "provenance"
+      },
+      {
+        "key": "trustedConfigHashes",
+        "manifestField": "trusted_config_hashes",
+        "presentByFile": true
+      },
+      {
+        "key": "ciSnapshot",
+        "inputKey": "ci",
+        "stripIgnoredFields": true
+      },
+      {
+        "key": "specApproval",
+        "inputKey": "specApproval"
+      },
+      {
+        "key": "authorizedExceptions",
+        "inputKey": "verifierComment",
+        "extractLinesContaining": [
+          "manual-verified ignored:",
+          "test removal approval ignored:"
+        ]
+      }
+    ],
+    "ciSnapshotIgnoredFields": [
+      "id",
+      "run_id",
+      "check_suite_id",
+      "started_at",
+      "completed_at",
+      "updated_at",
+      "created_at",
+      "details_url",
+      "html_details_url",
+      "node_id",
+      "external_id",
+      "app_id"
+    ]
+  }
+}

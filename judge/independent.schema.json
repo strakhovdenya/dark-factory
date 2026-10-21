@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["independent_expected_verdict", "requirements"],
+  "properties": {
+    "independent_expected_verdict": { "$taxonomy": "verdict" },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "literal_requirement",
+          "evidence_expected",
+          "single_interpretation",
+          "verify_proves_requirement",
+          "status",
+          "rationale"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The issue item ID this requirement comes from, e.g. AC-3, INV-1, TR-2, DOD-1."
+          },
+          "literal_requirement": {
+            "type": "string",
+            "description": "What behavior is literally required, read without looking at verifier conclusions."
+          },
+          "evidence_expected": {
+            "type": "string",
+            "description": "What evidence is supposed to prove this requirement."
+          },
+          "single_interpretation": {
+            "type": "boolean",
+            "description": "Whether the requirement has only one reasonable interpretation."
+          },
+          "verify_proves_requirement": {
+            "type": "boolean",
+            "description": "Whether the supplied Verify: mechanism actually proves the requirement."
+          },
+          "status": { "$taxonomy": "requirement_status" },
+          "rationale": {
+            "type": "string",
+            "description": "Free-text justification for the status above."
+          }
+        }
+      }
+    }
+  }
+}

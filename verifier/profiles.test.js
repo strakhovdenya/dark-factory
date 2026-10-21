@@ -12,22 +12,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { loadProfile } = require('../profile/load');
-const { lint } = require('./issue-lint');
-const { loadCore } = require('./issue-contract');
-const { computeScope } = require('./affects-scope');
-const { evaluate } = require('./verdict/verdict');
-const {
-  readApproval,
-  readRefsProblems,
-  parseAllowedModels,
-  parseProvenance,
-  parseTamperingScan,
-} = require('./verdict/inputs');
-const { parseCiFailures } = require('./verdict/ci');
-const { buildResult } = require('./verdict/result');
-const { singleRun } = require('./verdict/second-run');
 const { deterministicReason } = require('./verdict/reason');
-const { createCoreRegistry, coreRegistry } = require('./checks');
+const { createCoreRegistry } = require('./checks');
+const { verdictOf } = require('../test/helpers/verdict');
 const { goldenDirOf, readCases, summarize } = require('./eval/verifier-eval');
 
 const FIXTURES = path.join(__dirname, '..', 'test', 'fixtures');
@@ -91,36 +78,6 @@ const dummyRegistry = (calls) => {
   const registry = createCoreRegistry();
   registry.register(dummyCheck(calls));
   return registry;
-};
-
-// The verdict from the files of one case directory, through the same input
-// readers and check modules the verifier CLI uses. `report` replaces the
-// model report file.
-const verdictOf = (
-  root,
-  caseDir,
-  { registry = coreRegistry, report = readText(caseDir, 'model-report.json') } = {},
-) => {
-  const enabled = loadProfile(root).verifier?.checks;
-  assert.ok(enabled?.length > 0, 'the profile enables some checks');
-  const issue = readText(caseDir, 'issue.md');
-  const ciRaw = readText(COMMON, 'ci.json');
-  const scan = parseTamperingScan(readText(COMMON, 'tampering-scan.json'));
-  const result = evaluate(report, {
-    spec: lint(issue, loadCore(), { requireV2: true }),
-    scope: computeScope(issue, readText(caseDir, 'changed-files.txt')),
-    approval: readApproval(path.join(COMMON, 'approval.json')),
-    refsProblems: readRefsProblems(path.join(COMMON, 'refs-problems.json')),
-    ciFailures: parseCiFailures(ciRaw, undefined),
-    tamperingFindings: scan.findings,
-    assertionLosses: scan.assertionLosses,
-    assertionMoved: scan.assertionMoved,
-    provenance: parseProvenance(readText(COMMON, 'provenance.json')),
-    allowedModels: parseAllowedModels(readText(COMMON, 'allowed-models.json')),
-    registry,
-    checks: enabled,
-  });
-  return { result, summary: buildResult(singleRun(result)) };
 };
 
 const codesOf = ({ summary }) => summary.reasons.map(({ code }) => code);
