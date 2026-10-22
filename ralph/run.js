@@ -1,9 +1,10 @@
 'use strict';
 
-// Entry point of the Ralph controller. It works in the consumer repository named by an explicit
-// consumer root, with that repository's validated profile and the operator's local run config
-// (outside Git). Nothing is taken from the process's current directory or from the directory of
-// the installed package.
+// Entry point of the Ralph controller. It works in the consumer repository, with that repository's
+// validated profile and the operator's local run config (outside Git). The consumer root is the
+// explicit `--consumer-root` or, without it, the top of the git repository of the current
+// directory (the current directory is only the starting point of that search). Nothing is taken
+// from the directory of the installed package.
 //
 // Order of a run: readiness checks without side effects (profile settings the enabled controller
 // needs, the step pipeline against the step registry, local config, runs root, consumer repository and origin, block labels) -> lock in the
@@ -28,6 +29,8 @@ const { resolveAgentModel } = require('./agent');
 const sandbox = require('./sandbox');
 const { branchNameFor } = require('../profile/branch');
 const { DEFAULT_REGISTRY, resolvePipeline } = require('./steps/registry');
+const { freezeSnapshot } = require('./trusted-profile');
+const { loadProfile } = require('../profile/load');
 
 // Groups classify()'s per-issue statuses into what's ready to run vs. why everything else isn't,
 // and renders the summary lines. Pure: no I/O.
@@ -100,7 +103,7 @@ const samePath = (a, b) => {
 
 // The consumer root must be the top of a git repository with an origin; every git/gh call of the
 // controller runs there or in its clone.
-function assertConsumerRepository(consumerRoot) {
+function assertRepositoryTop(consumerRoot) {
   let topLevel;
   try {
     topLevel = github.git(['rev-parse', '--show-toplevel'], { cwd: consumerRoot, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -110,6 +113,10 @@ function assertConsumerRepository(consumerRoot) {
   if (!samePath(topLevel, consumerRoot)) {
     throw new Error(`Consumer root ${consumerRoot} is not the top of its git repository (${topLevel})`);
   }
+}
+
+function assertConsumerRepository(consumerRoot) {
+  assertRepositoryTop(consumerRoot);
   try {
     return github.originUrlOf(consumerRoot);
   } catch (error) {
@@ -124,6 +131,21 @@ function assertBlockLabels(consumerRoot, profile) {
   const missing = [BLOCK_LABEL, profile.labels.humanNeeded].filter((name) => !existing.has(name));
   if (missing.length > 0) {
     throw new Error(`Configuration error: label(s) ${missing.map((name) => `"${name}"`).join(', ')} do not exist in the consumer repository; create them (see ralph/README.md)`);
+  }
+}
+
+// The explicit root wins and must be the top of a git repository; it is never replaced by a
+// search. Without it the root is the top of the repository containing `cwd`.
+function resolveConsumerRoot(explicitRoot, cwd) {
+  if (explicitRoot !== null) {
+    const root = path.resolve(cwd, explicitRoot);
+    assertRepositoryTop(root);
+    return root;
+  }
+  try {
+    return path.resolve(github.git(['rev-parse', '--show-toplevel'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] }));
+  } catch (error) {
+    throw new Error(`No consumer root: ${cwd} is not inside a git repository; run from the consumer repository or pass --consumer-root <path>: ${error.message}`, { cause: error });
   }
 }
 
@@ -177,7 +199,10 @@ function startSandbox(consumerRoot, sandboxConfig, { sandboxApi = sandbox, docke
  * it without GitHub, Docker or an agent.
  * @param {{ consumerRoot: string, profile: any, localConfig: unknown, maxIterations?: number | null, deps?: any }} input
  */
-async function runRalph({ consumerRoot, profile, localConfig, maxIterations, deps = {} }) {
+async function runRalph({ consumerRoot, profile: suppliedProfile, localConfig, maxIterations, deps = {} }) {
+  // The trusted snapshot of the whole run: a frozen deep copy, so neither the caller's object nor
+  // anything running later can change the settings after this point.
+  const profile = freezeSnapshot(suppliedProfile);
   const { sandboxApi = sandbox, docker, env = process.env, classifyIssues = github.classify, runOneIssue = runIssue, lockIsAlive, echo, stepRegistry = DEFAULT_REGISTRY } = deps;
   const prepared = prepareRun({ consumerRoot, profile, localConfig, sandboxApi, env, stepRegistry });
   const { settings, agentModel, sandboxConfig, runsRoot, originUrl } = prepared;
@@ -257,7 +282,7 @@ async function runLoop(ctx, { limit, classifyIssues, runOneIssue, saveState }) {
   return perIssueResults;
 }
 
-const USAGE = 'usage: node ralph/run.js --consumer-root <path> [--config <local-config.json>] [--max-iterations <n>]';
+const USAGE = 'usage: node ralph/run.js [--consumer-root <path>] [--config <local-config.json>] [--max-iterations <n>]';
 
 function parseArgs(argv) {
   const options = { consumerRoot: null, config: null, maxIterations: null };
@@ -272,21 +297,24 @@ function parseArgs(argv) {
       options.maxIterations = number;
     } else return null;
   }
-  return options.consumerRoot === null ? null : options;
+  return options;
 }
 
-async function main(argv = process.argv.slice(2)) {
+/**
+ * @param {string[]} [argv]
+ * @param {{ cwd?: string, deps?: any }} [options] `cwd`: where the root search starts; `deps`: passed to runRalph.
+ */
+async function main(argv = process.argv.slice(2), { cwd = process.cwd(), deps } = {}) {
   const args = parseArgs(argv);
   if (args === null) {
     process.stderr.write(`${USAGE}\n`);
     return 2;
   }
-  const consumerRoot = path.resolve(args.consumerRoot);
-  const { loadProfile } = require('../profile/load');
+  const consumerRoot = resolveConsumerRoot(args.consumerRoot, cwd);
   const profile = loadProfile(consumerRoot);
-  const localConfig = loadLocalConfig(args.config ? path.resolve(args.config) : path.join(consumerRoot, LOCAL_CONFIG_RELATIVE_PATH));
-  sandbox.installExitHandlers();
-  await runRalph({ consumerRoot, profile, localConfig, maxIterations: args.maxIterations });
+  const localConfig = loadLocalConfig(args.config ? path.resolve(cwd, args.config) : path.join(consumerRoot, LOCAL_CONFIG_RELATIVE_PATH));
+  (deps?.sandboxApi || sandbox).installExitHandlers();
+  await runRalph({ consumerRoot, profile, localConfig, maxIterations: args.maxIterations, deps });
   return 0;
 }
 
@@ -302,4 +330,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { main, parseArgs, prepareRun, startSandbox, runRalph, summarizeStatuses, REQUIRED_PROFILE_SETTINGS };
+module.exports = { main, parseArgs, resolveConsumerRoot, prepareRun, startSandbox, runRalph, summarizeStatuses, REQUIRED_PROFILE_SETTINGS };

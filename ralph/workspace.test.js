@@ -338,7 +338,7 @@ const MANIFEST = { monorepo: 'packages/billing/package.json', 'single-package': 
 const scenario = async (t, fixture, { mutate, files = {}, implement, onRun, defaultBranch } = {}) => {
   isolateGit(t);
   const profile = controllerProfile(t, fixture, mutate);
-  const { origin, consumerRoot, scratch } = makeConsumer(t, { files: { [MANIFEST[fixture]]: '{"name":"x"}\n', ...files }, defaultBranch });
+  const { origin, consumerRoot, scratch } = makeConsumer(t, { files: { [MANIFEST[fixture]]: '{"name":"x"}\n', ...files }, defaultBranch, profile });
   const issue = issueWith(3, [APP_FILE[fixture], MANIFEST[fixture]]);
   const gh = fakeGitHub({ body: issue.body });
   const calls = mockGh(t, gh.onGh);

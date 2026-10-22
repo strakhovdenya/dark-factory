@@ -10,7 +10,6 @@ The controller is in the package, but these stages are still missing; until they
 
 | Missing stage | What it adds |
 |---|---|
-| Profile lookup from the git root | the consumer root found from the current repository instead of `--consumer-root` |
 | Skills setup in the clone | the package installs the required skills into the clone after the dependency install. Until then a required skill missing in the clone makes the issue BLOCKED before the agent |
 | Hooks | the skill-gate and lint/typecheck hooks of the package |
 | Docker integration tests | real-container proof of the sandbox protections (`test/integration/`); the reference Docker scenarios are recorded in `test/fixtures/ralph-controller/integration-cases.json` and are **not** verified by `npm test` |
@@ -18,15 +17,22 @@ The controller is in the package, but these stages are still missing; until they
 
 There is no host fallback at any stage: without Docker nothing runs.
 
-## Explicit inputs
+## Inputs and the consumer root
 
-The controller never uses the process's current directory or the directory of the installed package.
+The controller never uses the directory of the installed package. The current directory is only the starting point of the root search (or the base of a relative CLI path); after the root is known every git and gh call has an explicit cwd.
 
 ```sh
+# from the consumer repository or any of its subdirectories
+node node_modules/dark-factory/ralph/run.js [--config <local-config.json>] [--max-iterations <n>]
+# or for any location
 node node_modules/dark-factory/ralph/run.js --consumer-root <path> [--config <local-config.json>] [--max-iterations <n>]
 ```
 
-API: `runRalph({ consumerRoot, profile, localConfig, maxIterations, deps })` in `run.js`. `deps.stepRegistry` is an optional prepared step registry (see "Step pipeline"); without it the default registry of `steps/registry.js` is used.
+- **`--consumer-root` is optional and wins.** The path is resolved against the current directory and must be the top of a git repository; a wrong value is an error, never replaced by a search for another project.
+- **Without it** the root is `git rev-parse --show-toplevel` of the current directory, so a run from a subdirectory finds the project's root and profile. Outside a git repository the CLI stops with an error about the root.
+- The profile of that root is loaded and validated before the lock, the runs directory and the clone: a missing file (the error names the expected path) or an invalid field (named) stops the run.
+
+API: `runRalph({ consumerRoot, profile, localConfig, maxIterations, deps })` in `run.js`. `consumerRoot` stays explicit in the API. `deps.stepRegistry` is an optional prepared step registry (see "Step pipeline"); without it the default registry of `steps/registry.js` is used.
 
 1. **`consumerRoot`** — absolute path of the top of the consumer's git repository. It must have an `origin`. Every git and gh call of the controller runs there or in its run clone; the clone is made from that origin.
 2. **The profile** — `<consumerRoot>/.factory/profile.json`, loaded and validated by `profile/load.js`. It is the only source of project values: apps, `install`, `apps[].install`, `apps[].gate`, `dependencySync`, `protectedPaths`, `docOnlyPathPatterns`, `ruleFiles`, `agentEnvironment`, `skillRules`, `labels.humanNeeded`, `ralph.humanNeededVerdict`, `ralph.techDebtTrackerIssue`, `ralph.enabledSteps`, `ralph.stepBudgets`, `branchTemplate`, `sandbox`.
@@ -42,6 +48,12 @@ API: `runRalph({ consumerRoot, profile, localConfig, maxIterations, deps })` in 
 
    Unknown fields are rejected. `branchPrefix` is rejected: task branches are named by the profile's `branchTemplate`.
 4. **Credentials** — `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in the controller's environment. They reach the agent container by name only (never in argv, never in the profile or logs). Without either, the agent is not started. The operator's own Claude, git and gh configuration is never read. The controller itself uses the operator's `git` and `gh` login for the consumer repository.
+
+## Trusted profile of a run
+
+- **Snapshot.** `runRalph` makes a deep copy of the validated host profile and freezes it recursively (nested objects and arrays) before the readiness checks. That one snapshot is the `ctx.profile` of every issue of the run; the caller's object stays mutable and is not used afterwards, and the host's file is not read again.
+- **Base check.** For each issue, right after the clone checks out the base that is actually used (the default branch or, for a stacked issue, the dependency's task branch) and before the egress proxy, dependency installation and the agent, the clone's `.factory/profile.json` is loaded with the same loader and compared with the snapshot by JSON value (object key order and formatting do not matter, array order does). A missing, invalid or different profile makes the issue `prepare_failed` with a configuration error naming the host, the clone and the base (a loader failure keeps its own reason). The controller never repairs or publishes a profile: commit the same profile to the base.
+- **Protected file.** `.factory/profile.json` is a core protected path next to `.git/` and `.claude/`, whatever `protectedPaths` and the issue's Affects say: the agent gets Edit/Write denials for it, and a change or deletion is BLOCKED right after that turn, with no further step, commit, push or PR.
 
 ## Readiness checks (before the lock, the clone and the agent)
 
@@ -98,7 +110,7 @@ One issue runs through a pipeline of **steps**. The steps live in a registry (`s
 
 The profile can add constraints but not switch these off:
 
-- A boundary check after **every** agent turn and once more before commit: any changed path under `protectedPaths` plus the core entries `.git/` and `.claude/` (glob semantics of `profile/path-patterns.js`, case-insensitive; new, deleted, renamed — both sides —, type-changed and binary files by path), a fingerprint of `.git/`, and package.json scripts/dependencies or tool configs changed without being named in the issue's Affects. A violation is BLOCKED, no PR.
+- A boundary check after **every** agent turn and once more before commit: any changed path under `protectedPaths` plus the core entries `.git/`, `.claude/` and `.factory/profile.json` (glob semantics of `profile/path-patterns.js`, case-insensitive; new, deleted, renamed — both sides —, type-changed and binary files by path), a fingerprint of `.git/`, and package.json scripts/dependencies or tool configs changed without being named in the issue's Affects. A violation is BLOCKED, no PR.
 - Read-only review passes must leave the working tree unchanged.
 - Per-call timeout and whole-issue time/USD budgets.
 - An exclusive lock per runs root.
