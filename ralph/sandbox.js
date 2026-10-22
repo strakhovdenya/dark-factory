@@ -139,6 +139,23 @@ const SANDBOX_FIELDS = ['image', 'nodeVersion', 'claudeCodeVersion', 'allowedHos
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+// Names of the arguments of a call. `rootKey` and `runLabel` end up in label values, in a
+// `--filter label=...=<rootKey>` and in container and network names; a container name, a network
+// name and `spec.name` are Docker object names. Checked before any Docker or filesystem action.
+const IDENTIFIER_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const DOCKER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+
+function assertMatches(value, pattern, field, expected) {
+  if (typeof value !== 'string' || !pattern.test(value)) {
+    throw new Error(`invalid sandbox ${field}: ${expected}, got ${JSON.stringify(value)}`);
+  }
+}
+
+const assertImage = (image) => assertMatches(image, IMAGE_TAG_RE, 'image', 'expected a Docker image name with an explicit tag (name:tag)');
+const assertRootKey = (rootKey) => assertMatches(rootKey, IDENTIFIER_RE, 'rootKey', 'expected letters, digits, "_", "." or "-" (at most 64)');
+const assertRunLabel = (runLabel) => assertMatches(runLabel, IDENTIFIER_RE, 'runLabel', 'expected letters, digits, "_", "." or "-" (at most 64)');
+const assertNetwork = (network) => assertMatches(network, DOCKER_NAME_RE, 'network', 'expected "none" or a Docker network name');
+
 /**
  * Every problem of a `sandbox` section as `{ path, message }`, where `path` is the full dotted
  * path of the offending field under `basePath`. The single rule set: the profile loader and the
@@ -296,6 +313,7 @@ const listIds = (docker, args) =>
 // Containers and networks a killed controller of this consumer left behind. Nothing without this
 // consumer's `managed` label is touched.
 function removeLeftovers(rootKey, { docker = DOCKER } = {}) {
+  assertRootKey(rootKey);
   const filter = `label=${LABEL_MANAGED}=${rootKey}`;
   const containers = listIds(docker, ['ps', '-aq', '--filter', filter]);
   if (containers.length > 0) childProcess.spawnSync(docker, ['rm', '-f', ...containers], { stdio: 'ignore' });
@@ -358,6 +376,11 @@ function gitDirMount(runDir, homeEnv) {
 // `-e NAME=value`, so it never changes the CLI's own env (its HOME/config, a tcp:// DOCKER_HOST
 // dialled through a proxy). The proxy values come last and win.
 function buildRunArgs(spec, homeEnv = process.env) {
+  assertImage(spec.image);
+  assertRootKey(spec.rootKey);
+  assertRunLabel(spec.runLabel);
+  assertNetwork(spec.network);
+  if (spec.name !== undefined) assertMatches(spec.name, DOCKER_NAME_RE, 'name', 'expected a Docker container name');
   assertMountable(spec.runDir, homeEnv);
   if (spec.sessionsDir) assertMountable(spec.sessionsDir, homeEnv);
   if (!Array.isArray(spec.command) || spec.command.length === 0) throw new Error('sandbox command is empty');
@@ -367,6 +390,10 @@ function buildRunArgs(spec, homeEnv = process.env) {
   for (const name of [...Object.keys(env), ...Object.keys(publicEnv), ...Object.keys(proxyEnv)]) {
     if (!ENV_NAME_RE.test(name)) throw new Error(`invalid sandbox env name: ${name}`);
   }
+  // A secret is passed as `-e NAME`; the same name also given as `-e NAME=value` would be set
+  // twice. A public name that equals a proxy name is the one intended override and is kept.
+  const setTwice = Object.keys(env).filter((name) => Object.hasOwn(publicEnv, name) || Object.hasOwn(proxyEnv, name));
+  if (setTwice.length > 0) throw new Error(`sandbox env name is set more than once: ${setTwice.join(', ')}`);
   const user = spec.user === undefined ? hostUser() : spec.user;
   const workdir = path.posix.join(CONTAINER_WORKDIR, (spec.workdir || '').replace(/\\/g, '/'));
   const isInRunDir = workdir === CONTAINER_WORKDIR || workdir.startsWith(`${CONTAINER_WORKDIR}/`);
@@ -471,6 +498,12 @@ function stopProxy(proxy, { docker = DOCKER } = {}) {
 // An internal network (no route out) for the agent/install containers, plus a proxy container on
 // that network and on the default bridge. The proxy is the only way out.
 function startProxy({ image, rootKey, runLabel, allowedHosts }, { docker = DOCKER } = {}) {
+  assertImage(image);
+  assertRootKey(rootKey);
+  assertRunLabel(runLabel);
+  if (!Array.isArray(allowedHosts) || allowedHosts.length === 0 || !allowedHosts.every(isAllowedHostName)) {
+    throw new Error('invalid sandbox allowedHosts: expected a non-empty array of host names');
+  }
   const network = uniqueName('ralph-net', runLabel);
   const name = uniqueName('ralph-proxy', runLabel);
   const labels = ['--label', `${LABEL_MANAGED}=${rootKey}`, '--label', `${LABEL_RUN}=${runLabel}`];

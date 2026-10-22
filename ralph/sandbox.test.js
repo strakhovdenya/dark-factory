@@ -567,6 +567,89 @@ test('builds image from installed package assets', (t) => {
   assert.deepEqual(calls[0].args, args);
 });
 
+// --- call arguments ---
+
+test('rejects invalid call arguments before docker', (t) => {
+  const { env } = useHome(t);
+  const dir = scratch(t);
+  const clone = makeClone(dir);
+  const { calls } = mockProcesses(t);
+  const spec = (overrides) => ({ ...BOX, runDir: clone, command: ['true'], ...overrides });
+  const bad = {
+    image: ['untagged-image', 'bad image:tag', '', undefined, 42],
+    rootKey: ['', 'a b', 'key=1', 'key,other', '-key', 'x'.repeat(65), undefined, 7],
+    runLabel: ['', 'issue 18', 'a/b', 'issue:1', '.hidden', 'x'.repeat(65), undefined],
+    network: ['', 'two words', 'net/x', 'net:x', '-net', undefined, null, 5],
+    name: ['', 'has space', 'a/b', '-x', null, 5],
+  };
+  for (const [field, values] of Object.entries(bad)) {
+    for (const value of values) {
+      const label = `${field}=${JSON.stringify(value)}`;
+      assert.throws(() => sandbox.buildRunArgs(spec({ [field]: value }), env), new RegExp(`invalid sandbox ${field}`), label);
+      assert.throws(() => sandbox.runInSandboxSync(spec({ [field]: value })), new RegExp(`invalid sandbox ${field}`), label);
+      assert.throws(() => sandbox.spawnInSandbox(spec({ [field]: value })), new RegExp(`invalid sandbox ${field}`), label);
+    }
+  }
+  for (const rootKey of ['', 'a b', 'key=1', undefined, 7]) {
+    assert.throws(() => sandbox.removeLeftovers(rootKey), /invalid sandbox rootKey/, JSON.stringify(rootKey));
+  }
+  const proxyArgs = { image: NEUTRAL.image, rootKey: 'k', runLabel: 'issue-1', allowedHosts: NEUTRAL.allowedHosts };
+  const badProxy = [
+    { image: 'untagged' }, { rootKey: 'a b' }, { runLabel: 'a/b' },
+    { allowedHosts: [] }, { allowedHosts: 'registry.example.org' }, { allowedHosts: undefined },
+    { allowedHosts: ['registry.example.org', 'host.example.org,evil.example.org'] },
+    { allowedHosts: ['registry.example.org', '10.0.0.1'] },
+  ];
+  for (const change of badProxy) {
+    assert.throws(() => sandbox.startProxy({ ...proxyArgs, ...change }), /invalid sandbox/, JSON.stringify(change));
+  }
+  assert.deepEqual(calls, [], 'nothing reached Docker');
+  assert.equal(removalsOf(calls).length, 0);
+
+  // Valid arguments of every kind are accepted.
+  for (const network of ['none', 'ralph-net-issue-1-123-1-ab12cd', 'net_1.x']) {
+    assert.equal(valueAfter(sandbox.buildRunArgs(spec({ network }), env), '--network'), network);
+  }
+  const named = sandbox.buildRunArgs(spec({ name: 'ralph-fixed.name_1', rootKey: sandbox.rootKeyFor(dir), runLabel: 'issue-18' }), env);
+  assert.equal(valueAfter(named, '--name'), 'ralph-fixed.name_1');
+  assert.doesNotThrow(() => sandbox.removeLeftovers(sandbox.rootKeyFor(dir)));
+  assert.equal(calls.length > 0 && calls.every((call) => call.command === 'docker'), true);
+});
+
+test('rejects env names that are set more than once', (t) => {
+  const { env } = useHome(t);
+  const dir = scratch(t);
+  const clone = makeClone(dir);
+  const { calls } = mockProcesses(t);
+  const proxyUrl = 'http://proxy-x.example.org:3128';
+  const spec = (overrides) => ({ ...BOX, runDir: clone, command: ['true'], ...overrides });
+
+  assert.throws(
+    () => sandbox.buildRunArgs(spec({ env: { SHARED_NAME: 'secret-value-1' }, publicEnv: { SHARED_NAME: 'public-value' } }), env),
+    (/** @type {Error} */ error) => error.message.includes('SHARED_NAME') && !/secret-value-1|public-value/.test(error.message),
+  );
+  for (const name of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy']) {
+    assert.throws(
+      () => sandbox.buildRunArgs(spec({ proxyUrl, env: { [name]: 'secret-value-2' } }), env),
+      (/** @type {Error} */ error) => error.message.includes(name) && !error.message.includes('secret-value-2'),
+      name,
+    );
+  }
+  assert.throws(
+    () => sandbox.buildRunArgs(spec({ proxyUrl, env: { A_NAME: 'x', B_NAME: 'y' }, publicEnv: { A_NAME: '1', B_NAME: '2' } }), env),
+    /A_NAME, B_NAME/,
+  );
+  assert.throws(() => sandbox.runInSandboxSync(spec({ env: { SHARED_NAME: 'x' }, publicEnv: { SHARED_NAME: 'y' } })), /SHARED_NAME/);
+  assert.deepEqual(calls, [], 'nothing reached Docker');
+
+  // A proxy name among the secrets is only a problem when the runtime adds the proxy settings.
+  assert.doesNotThrow(() => sandbox.buildRunArgs(spec({ env: { HTTPS_PROXY: 'x' } }), env));
+  // The intended override stays: the proxy values replace a public setting of the same name.
+  const args = sandbox.buildRunArgs(spec({ proxyUrl, publicEnv: { HTTPS_PROXY: 'http://other.example.org:1', KEEP_ME: 'yes' } }), env);
+  assert.deepEqual(args.filter((arg) => arg.startsWith('HTTPS_PROXY=')), [`HTTPS_PROXY=${proxyUrl}`]);
+  assert.ok(args.includes('KEEP_ME=yes'));
+});
+
 // --- cleanup ---
 
 test('cleans up owned resources after failure', (t) => {

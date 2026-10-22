@@ -38,8 +38,14 @@ Clones and agent session journals live under the runs root. It is a personal set
 - Nothing under the operator's home (symlinks and junctions resolved) is ever mounted.
 - Only the run clone, its own `.git` (read-only when the call requires it; it must be a real directory, not a link) and the session directory are mounted; the work directory stays inside the workspace.
 - `--cap-drop ALL`, `no-new-privileges`, `--init`, `--rm`, ownership labels for cleanup.
+- Call arguments are checked before any Docker or filesystem action: `image` needs an explicit `name:tag`; `rootKey` and `runLabel` (label values, filters and object names) and `network` / `name` (Docker object names) must be plain names of letters, digits, `_`, `.`, `-`. The same checks apply to `startProxy` (including every `allowedHosts` entry) and `removeLeftovers`. Which network a call uses is the caller's policy; this module only checks that the value is a well-formed name.
+- A variable name may be given once. A secret name (`env`) that also appears in `publicEnv`, or among the proxy variables the runtime adds when `proxyUrl` is set, is rejected with the name (never the value), because the container would receive that name from two sources. A `publicEnv` entry with a proxy name is not an error: the runtime's proxy value replaces it.
 - Secrets go as `-e NAME`; values live only in the Docker CLI's own process environment and never in argv. Public settings and the proxy address are `-e NAME=value` and do not change the CLI's environment.
 - Cleanup removes only containers and networks that carry the consumer's own `managed` label; a timeout or failure removes the container.
+
+## Known limitation: proxy filters names, not addresses
+
+The egress proxy limits destinations by **host name** (exact match, `CONNECT` to port 443). It does not check the class of the IP address the name resolves to, for example a private or link-local address. The allowlist and the DNS used by the machine that runs the proxy are therefore trusted: list only names the owner trusts. This limitation applies to local runs too.
 
 ## Module independence
 
