@@ -20,11 +20,6 @@ const CORE_PROTECTED_PATHS = Object.freeze(['.git/', '.claude/']);
 // read-only checks, so it needs far fewer turns than the implementer.
 const DEFAULT_REVIEW_MAX_TURNS = 40;
 
-// Review-FAIL -> point-fix -> re-review cycles before the issue is BLOCKED. The self-review and
-// the code-review pass have separate budgets so one cannot starve the other.
-const MAX_REVIEW_FIX_ATTEMPTS = 2;
-const MAX_CODE_REVIEW_FIX_ATTEMPTS = 2;
-
 // Budgets (the local config may override each). A single agent call is stopped after
 // agentTimeoutMinutes; all calls of one issue together stop at taskMaxMinutes / taskMaxUsd.
 const DEFAULT_AGENT_TIMEOUT_MINUTES = 60;
@@ -186,8 +181,6 @@ module.exports = {
   BLOCK_LABEL,
   CORE_PROTECTED_PATHS,
   DEFAULT_REVIEW_MAX_TURNS,
-  MAX_REVIEW_FIX_ATTEMPTS,
-  MAX_CODE_REVIEW_FIX_ATTEMPTS,
   DEFAULT_AGENT_TIMEOUT_MINUTES,
   DEFAULT_TASK_MAX_MINUTES,
   DEFAULT_TASK_MAX_USD,

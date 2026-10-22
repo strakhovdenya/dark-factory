@@ -83,5 +83,5 @@
     "allowedHosts": ["registry.npmjs.org", "binaries.prisma.sh", "api.anthropic.com"],
     "installEnv": { "PUPPETEER_SKIP_DOWNLOAD": "true" }
   },
-  "ralph": { "enabled": true, "techDebtTrackerIssue": 334, "enabledSteps": [], "humanNeededVerdict": "BLOCKED-PROMPT-CHANGE" }
+  "ralph": { "enabled": true, "techDebtTrackerIssue": 334, "humanNeededVerdict": "BLOCKED-PROMPT-CHANGE" }
 }

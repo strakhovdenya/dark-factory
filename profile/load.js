@@ -5,6 +5,7 @@ const path = require('node:path');
 const Ajv2020 = require('ajv/dist/2020').default;
 const schema = require('./schema.json');
 const { collectSandboxProblems } = require('../ralph/sandbox');
+const { pipelineStructureProblems } = require('../ralph/steps/registry');
 
 const PROFILE_RELATIVE_PATH = path.join('.factory', 'profile.json');
 
@@ -85,6 +86,12 @@ function loadProfile(projectRoot) {
     // The "if" error only restates the failing "then" branch, which is reported by its own errors.
     const lines = validate.errors.filter((e) => e.keyword !== 'if').map(describeError);
     const list = [...new Set(lines)].map((line) => `  - ${line}`).join('\n');
+    throw new Error(`Invalid profile ${profilePath}:\n${list}`);
+  }
+  // The step pipeline's structure; the names are checked against the step registry by the runner.
+  const pipelineProblems = pipelineStructureProblems(profile.ralph);
+  if (pipelineProblems.length > 0) {
+    const list = pipelineProblems.map((problem) => `  - ${problem.path}: ${problem.message}`).join('\n');
     throw new Error(`Invalid profile ${profilePath}:\n${list}`);
   }
   if (profile.sandbox !== undefined) {

@@ -88,7 +88,7 @@ const makeConsumer = (t, { files = {}, defaultBranch = 'trunk' } = {}) => {
 
 /** Makes Ralph's controller settings complete on a fixture profile copy. */
 const enableController = (profile) => {
-  profile.ralph = { ...profile.ralph, enabled: true, techDebtTrackerIssue: profile.ralph?.techDebtTrackerIssue ?? 5, enabledSteps: [], humanNeededVerdict: HUMAN_VERDICT };
+  profile.ralph = { ...profile.ralph, enabled: true, techDebtTrackerIssue: profile.ralph?.techDebtTrackerIssue ?? 5, humanNeededVerdict: HUMAN_VERDICT };
   profile.labels = { ...profile.labels, humanNeeded: HUMAN_LABEL };
 };
 
@@ -233,13 +233,14 @@ const issueWith = (id, paths, { title = 'Neutral change', acCount = 2 } = {}) =>
 
 /** The run context the controller builds after its readiness checks. */
 /** @type {(...args: any[]) => any} */
-const runContext = (t, { consumerRoot, origin, profile, settings = {} }) => ({
+const runContext = (t, { consumerRoot, origin, profile, settings = {}, stepRegistry }) => ({
   consumerRoot,
   profile,
   settings: { issues: [], maxTurns: 20, ...settings },
   originUrl: origin,
   env: { ANTHROPIC_API_KEY: 'sk-test-placeholder' },
   echo: { out: () => {}, err: () => {} },
+  stepRegistry,
   sandboxEnv: {
     sandboxConfig: sandbox.validateSandboxConfig(profile.sandbox),
     runsRoot: path.join(tempDir(t, 'ralph-runs-'), 'runs'),
@@ -247,6 +248,53 @@ const runContext = (t, { consumerRoot, origin, profile, settings = {} }) => ({
     agentModel: 'test-model',
   },
 });
+
+// --- one issue end to end on a neutral consumer ---
+
+/** The application file the default agent changes in each fixture profile. */
+const APP_FILE = { monorepo: 'packages/billing/src/a.ts', 'single-package': 'src/a.ts' };
+
+/** Sandbox runs: an install (networked run) lays out the base skills; the gate (no network) passes. */
+const defaultRun = (spec) => {
+  if (spec.network !== 'none') installBaseSkills(spec.runDir);
+  return okResult();
+};
+
+/** Both reviews pass; `implement` (or the given function) changes the app file and says DONE. */
+/** @type {(...args: any[]) => any} */
+const defaultAgent = (fixture, { implement } = {}) => ({ pass, runDir }) => {
+  if (pass === 'self-review') return 'REVIEW: PASS';
+  if (pass === 'code-review') return 'CODEREVIEW: PASS';
+  if (implement) return implement({ pass, runDir });
+  writeFiles(runDir, { [APP_FILE[fixture]]: 'export const value = 1;\n' });
+  return done('feat', 'add the value', SELF_REPORT_FULL(2));
+};
+
+/**
+ * runIssue for one issue on a fresh neutral consumer with gh and the sandbox replaced. Returns the
+ * result with the recorded agent calls, sandbox runs and GitHub mutations.
+ */
+/** @type {(...args: any[]) => any} */
+const scenario = async (t, fixture, { mutate, files = {}, issue = issueWith(7, [APP_FILE[fixture]]), onAgent, onRun = defaultRun, labels, proxy = true, settings, stepRegistry } = {}) => {
+  const { runIssue } = require('../../ralph/core');
+  isolateGit(t);
+  const profile = controllerProfile(t, fixture, mutate);
+  const { origin, consumerRoot } = makeConsumer(t, { files });
+  const gh = fakeGitHub({ body: issue.body, labels });
+  const calls = mockGh(t, gh.onGh);
+  const box = mockSandbox(t, { onAgent: onAgent || defaultAgent(fixture), onRun, proxy });
+  const ctx = runContext(t, { consumerRoot, origin, profile, settings, stepRegistry });
+  const result = await runIssue(ctx, new Map([[issue.id, { ...issue, status: 'not-started' }]]), issue);
+  const labelsSet = gh.mutations.filter((m) => m.kind === 'label').map((m) => m.label);
+  const comments = gh.mutations.filter((m) => m.kind === 'comment');
+  const prs = gh.mutations.filter((m) => m.kind === 'pr');
+  return { result, gh, calls, box, ctx, origin, consumerRoot, profile, labelsSet, comments, prs };
+};
+
+const originBranches = (origin) =>
+  gitIn(origin, 'for-each-ref', '--format=%(refname:short)', 'refs/heads')
+    .split('\n')
+    .filter(Boolean);
 
 module.exports = {
   HUMAN_VERDICT,
@@ -267,4 +315,9 @@ module.exports = {
   done,
   issueWith,
   runContext,
+  APP_FILE,
+  defaultRun,
+  defaultAgent,
+  scenario,
+  originBranches,
 };

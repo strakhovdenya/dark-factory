@@ -481,6 +481,18 @@ function writeCodeReviewPermissions(runDir, profile) {
   });
 }
 
+// Named permission profiles owned by the controller. A step names one; it never supplies raw rules.
+const PERMISSION_PROFILES = Object.freeze({
+  implementer: writeAgentPermissions,
+  reviewer: (runDir, profile) => writeReviewerPermissions(runDir, profile),
+  'code-reviewer': (runDir, profile) => writeCodeReviewPermissions(runDir, profile),
+});
+
+function writePermissionProfile(name, runDir, profile, skillNames) {
+  if (!Object.hasOwn(PERMISSION_PROFILES, name)) throw new Error(`unknown permission profile "${name}"`);
+  PERMISSION_PROFILES[name](runDir, profile, skillNames);
+}
+
 module.exports = {
   gitStatusZ,
   runDirFor,
@@ -514,4 +526,6 @@ module.exports = {
   writeAgentPermissions,
   writeReviewerPermissions,
   writeCodeReviewPermissions,
+  PERMISSION_PROFILES,
+  writePermissionProfile,
 };

@@ -1,6 +1,6 @@
 # Ralph controller
 
-Ralph executes GitHub issues of a consumer project (a repository that installed this package) with a Claude Code agent. The **controller** in this directory is deterministic code: it picks an issue, prepares a clone, runs the agent and two review passes in the Docker sandbox, checks the agent's boundaries after every turn, runs the project's gate and, only when everything is green, commits, pushes and opens the PR. The agent only edits files and reports a verdict.
+Ralph executes GitHub issues of a consumer project (a repository that installed this package) with a Claude Code agent. The **controller** in this directory is deterministic code: it picks an issue, prepares a clone, runs the step pipeline (by default the agent and two review passes) in the Docker sandbox, checks the agent's boundaries after every turn, runs the project's gate and, only when everything is green, commits, pushes and opens the PR. The agent only edits files and reports a verdict.
 
 Ralph is **off by default** (`ralph.enabled` in the profile). In this repository it stays disabled.
 
@@ -10,7 +10,6 @@ The controller is in the package, but these stages are still missing; until they
 
 | Missing stage | What it adds |
 |---|---|
-| Step registry | optional Ralph steps registered and switched on by `ralph.enabledSteps` |
 | Profile lookup from the git root | the consumer root found from the current repository instead of `--consumer-root` |
 | Skills setup in the clone | the package installs the required skills into the clone after the dependency install. Until then a required skill missing in the clone makes the issue BLOCKED before the agent |
 | Hooks | the skill-gate and lint/typecheck hooks of the package |
@@ -27,10 +26,10 @@ The controller never uses the process's current directory or the directory of th
 node node_modules/dark-factory/ralph/run.js --consumer-root <path> [--config <local-config.json>] [--max-iterations <n>]
 ```
 
-API: `runRalph({ consumerRoot, profile, localConfig, maxIterations })` in `run.js`.
+API: `runRalph({ consumerRoot, profile, localConfig, maxIterations, deps })` in `run.js`. `deps.stepRegistry` is an optional prepared step registry (see "Step pipeline"); without it the default registry of `steps/registry.js` is used.
 
 1. **`consumerRoot`** — absolute path of the top of the consumer's git repository. It must have an `origin`. Every git and gh call of the controller runs there or in its run clone; the clone is made from that origin.
-2. **The profile** — `<consumerRoot>/.factory/profile.json`, loaded and validated by `profile/load.js`. It is the only source of project values: apps, `install`, `apps[].install`, `apps[].gate`, `dependencySync`, `protectedPaths`, `docOnlyPathPatterns`, `ruleFiles`, `agentEnvironment`, `skillRules`, `labels.humanNeeded`, `ralph.humanNeededVerdict`, `ralph.techDebtTrackerIssue`, `branchTemplate`, `sandbox`.
+2. **The profile** — `<consumerRoot>/.factory/profile.json`, loaded and validated by `profile/load.js`. It is the only source of project values: apps, `install`, `apps[].install`, `apps[].gate`, `dependencySync`, `protectedPaths`, `docOnlyPathPatterns`, `ruleFiles`, `agentEnvironment`, `skillRules`, `labels.humanNeeded`, `ralph.humanNeededVerdict`, `ralph.techDebtTrackerIssue`, `ralph.enabledSteps`, `ralph.stepBudgets`, `branchTemplate`, `sandbox`.
 3. **The local run config** — personal, **outside Git** (default `<consumerRoot>/.ralph/config.json`; add `.ralph/` to the consumer's `.gitignore`):
 
    | Field | Meaning |
@@ -49,11 +48,12 @@ API: `runRalph({ consumerRoot, profile, localConfig, maxIterations })` in `run.j
 In this order, each with an exact error and no side effects:
 
 1. `ralph.enabled` is `true`, and the fields an enabled controller needs are present: `ralph.humanNeededVerdict`, `labels.humanNeeded`, `ralph.techDebtTrackerIssue`, `sandbox`. No project default is assumed.
-2. The local run config is valid; the agent model is a model ID.
-3. The sandbox section is valid (`sandbox.validateSandboxConfig`); the runs root resolves outside the home directory (`sandbox.resolveRunsRoot(localConfig, consumerRoot)`).
-4. `branchTemplate` recognizes its own branch names.
-5. `consumerRoot` is the top of a git repository with an `origin`.
-6. The labels `ralph-blocked` and `labels.humanNeeded` exist in the consumer repository (exact names). The controller never creates labels.
+2. The step pipeline against the step registry in force (`deps.stepRegistry` or the default): every name in `ralph.enabledSteps` is registered, every `ralph.stepBudgets` key is a registered step with a fix, every registered step is well formed and names a known permission profile. This holds even when the issue queue is empty.
+3. The local run config is valid; the agent model is a model ID.
+4. The sandbox section is valid (`sandbox.validateSandboxConfig`); the runs root resolves outside the home directory (`sandbox.resolveRunsRoot(localConfig, consumerRoot)`).
+5. `branchTemplate` recognizes its own branch names.
+6. `consumerRoot` is the top of a git repository with an `origin`.
+7. The labels `ralph-blocked` and `labels.humanNeeded` exist in the consumer repository (exact names). The controller never creates labels.
 
 Then: the lock (`<runsRoot>/run.lock`), the sandbox startup (Docker engine, leftovers of this consumer, image build) and the issue loop. State goes to `<runsRoot>/state.json`.
 
@@ -67,6 +67,26 @@ Then: the lock (`<runsRoot>/run.lock`), the sandbox startup (Docker engine, left
    The controller sets `ralph-blocked` on every BLOCKED outcome; the human-needed verdict sets both labels. An issue with either label is not picked by later runs, and issues that depend on it are `blocked-by-dependency`. A human removes the label after resolving the cause.
 2. Fill the profile (see below) and create the local run config.
 3. Add `.ralph/`, `.ralph-runs/` (or your `runsRoot`), `.claude/settings.local.json` and the installed skill copies to `.gitignore`.
+
+## Step pipeline
+
+One issue runs through a pipeline of **steps**. The steps live in a registry (`steps/registry.js`, step name -> step); `core.js` never imports a step module and runs only the steps of the resolved pipeline.
+
+| Base step | Kind | What it does |
+|---|---|---|
+| `implement` | agent, writes, profile `implementer` | the agent implements the issue (`steps/implement.js`) |
+| `self-review` | agent, read-only, profile `reviewer`, fix `review-fix` | a fresh agent checks the diff against the issue (`steps/self-review.js`) |
+| `code-review` | agent, read-only, profile `code-reviewer`, fix `code-review-fix` | the `code-review` skill in report-only mode (`steps/code-review.js`) |
+| `final-gate` | check (code, no model) | the profile's gate commands of the touched apps (`steps/final-gate.js`) |
+
+- **`ralph.enabledSteps`** — absent: the baseline pipeline `implement`, `self-review`, `code-review`, `final-gate` (both reviews on). An explicit list is the **whole** pipeline in run order: `implement` first and `final-gate` last, each exactly once; the reviews may be left out (`["implement", "self-review", "final-gate"]` has no code-review), and when both are listed `self-review` comes first. Other registered steps go between them and run only when listed. `[]` is invalid. `loadProfile` checks this structure; the runner checks the names against the registry.
+- **`ralph.stepBudgets`** — step name -> integer >= 1, the number of **fix calls** of a review step (4 allows at most five review calls). Defaults: `self-review` 2, `code-review` 2. Budgets are independent; the task's time and cost limits still cover every call. A key that is not a registered step with a fix is a configuration error; a budget of a registered review that is not enabled is allowed and does not enable it. Example: `"stepBudgets": { "self-review": 4, "code-review": 2 }`.
+- **Step kinds.** An `agent` step has a `mode` (`read-only` or `writes`), the name of a controller permission profile (`implementer`, `reviewer`, `code-reviewer` — a step never supplies raw rules), a prompt builder and an output parser; a read-only step may have a `fix` (its own prompt and parser, profile `implementer`, default budget). A `check` step is a deterministic function. Every step returns an outcome: `passed`, `passed-out-of-scope`, `failed` (fixable), `blocked`, `human-needed`, `error` or `unparseable`.
+- **What the controller does for every step.** Each agent call — fixes included — goes through the controller's wrapper: the named permission file written before the call, the scrubbed environment and sandbox, the per-call timeout, the task's time and cost budget, `maxTurns` for write calls and `reviewMaxTurns` for read-only calls. After every call the boundary check; after every read-only call the working tree must equal its state right before that call. After every passed write call the diff must be non-empty and DEL_RALPH is applied. A review loop is: read-only call -> on a fixable failure with budget left, a fix call -> read-only call again; an exhausted budget or an unreadable review verdict is BLOCKED without a fix. Out-of-scope findings go to the tech-debt tracker and the pipeline continues.
+- **Finishing.** Dependency sync runs after every earlier step, right before `final-gate` (doc-only diffs included); the gate and the last boundary check see the refreshed diff. Then: boundary check, commit, push, PR, report.
+- **Doc-only diff.** Steps with `skipOnDocOnly` (the reviews and the gate commands) are skipped; `final-gate` stays in the pipeline with the outcome `skipped`. Boundary checks, dependency sync and DEL_RALPH still apply.
+- **Result.** Once the steps have started, the result of `runIssue` has `steps`: the ordered `{ name, outcome }` list (`outcome` is a step outcome or `skipped`); on a stop the failing step is last. There is no separate log.
+- **Extensions.** A new step is a registry entry plus its name in `ralph.enabledSteps`; it stays off until a profile lists it. Pass the prepared registry as `deps.stepRegistry`, e.g. `createRegistry([...DEFAULT_REGISTRY.values(), myStep])`. No code is loaded from the profile or from a path.
 
 ## What the agent may do
 
@@ -126,9 +146,10 @@ The profile can add constraints but not switch these off:
 | File | Role |
 |---|---|
 | `run.js` | CLI and `runRalph`: readiness checks, lock, sandbox startup, issue loop |
-| `core.js` | one issue, start to finish |
+| `core.js` | one issue, start to finish: runs the resolved step pipeline |
+| `steps/` | the step registry (`registry.js`) and the base steps `implement`, `self-review`, `code-review`, `final-gate` |
 | `github.js` | every git/gh call, with an explicit cwd |
-| `workspace.js` | clone, installs, dependency sync, gate, DEL_RALPH, permissions |
+| `workspace.js` | clone, installs, dependency sync, gate, DEL_RALPH, named permission profiles |
 | `prompts.js` | the four prompts |
 | `parsing.js` | verdicts, self-report, porcelain, issue sections (names from the issue contract) |
 | `agent.js` | `claude -p` in the sandbox |

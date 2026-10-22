@@ -6,7 +6,7 @@
 // the installed package.
 //
 // Order of a run: readiness checks without side effects (profile settings the enabled controller
-// needs, local config, runs root, consumer repository and origin, block labels) -> lock in the
+// needs, the step pipeline against the step registry, local config, runs root, consumer repository and origin, block labels) -> lock in the
 // runs root -> sandbox startup (Docker engine, leftovers, image) -> the issue loop.
 
 const fs = require('node:fs');
@@ -27,6 +27,7 @@ const { runIssue } = require('./core');
 const { resolveAgentModel } = require('./agent');
 const sandbox = require('./sandbox');
 const { branchNameFor } = require('../profile/branch');
+const { DEFAULT_REGISTRY, resolvePipeline } = require('./steps/registry');
 
 // Groups classify()'s per-issue statuses into what's ready to run vs. why everything else isn't,
 // and renders the summary lines. Pure: no I/O.
@@ -129,13 +130,15 @@ function assertBlockLabels(consumerRoot, profile) {
 /**
  * Everything that has to hold before the lock, the first clone and the first agent. No side
  * effects: nothing is written, cloned, locked or started. Throws with the exact reason.
- * @param {{ consumerRoot: string, profile: any, localConfig: unknown, sandboxApi?: any, env?: NodeJS.ProcessEnv }} input
+ * @param {{ consumerRoot: string, profile: any, localConfig: unknown, sandboxApi?: any, env?: NodeJS.ProcessEnv, stepRegistry?: Map<string, any> }} input
  */
-function prepareRun({ consumerRoot, profile, localConfig, sandboxApi = sandbox, env = process.env }) {
+function prepareRun({ consumerRoot, profile, localConfig, sandboxApi = sandbox, env = process.env, stepRegistry = DEFAULT_REGISTRY }) {
   if (typeof consumerRoot !== 'string' || consumerRoot === '' || !path.isAbsolute(consumerRoot)) {
     throw new TypeError('prepareRun: consumerRoot must be an absolute path');
   }
   assertControllerSettings(profile);
+  // The step pipeline and budgets against the registry in force, whatever the queue holds.
+  resolvePipeline(profile, stepRegistry);
   const settings = validateLocalConfig(localConfig);
   const agentModel = resolveAgentModel(settings);
   const sandboxConfig = sandboxApi.validateSandboxConfig(profile.sandbox);
@@ -175,8 +178,8 @@ function startSandbox(consumerRoot, sandboxConfig, { sandboxApi = sandbox, docke
  * @param {{ consumerRoot: string, profile: any, localConfig: unknown, maxIterations?: number | null, deps?: any }} input
  */
 async function runRalph({ consumerRoot, profile, localConfig, maxIterations, deps = {} }) {
-  const { sandboxApi = sandbox, docker, env = process.env, classifyIssues = github.classify, runOneIssue = runIssue, lockIsAlive, echo } = deps;
-  const prepared = prepareRun({ consumerRoot, profile, localConfig, sandboxApi, env });
+  const { sandboxApi = sandbox, docker, env = process.env, classifyIssues = github.classify, runOneIssue = runIssue, lockIsAlive, echo, stepRegistry = DEFAULT_REGISTRY } = deps;
+  const prepared = prepareRun({ consumerRoot, profile, localConfig, sandboxApi, env, stepRegistry });
   const { settings, agentModel, sandboxConfig, runsRoot, originUrl } = prepared;
   const limit = maxIterations ?? /** @type {any} */ (settings).maxIterations ?? null;
   const lockPath = lockPathFor(runsRoot);
@@ -194,6 +197,7 @@ async function runRalph({ consumerRoot, profile, localConfig, maxIterations, dep
       originUrl,
       env,
       echo,
+      stepRegistry,
       sandboxEnv: { sandboxConfig, runsRoot, rootKey, agentModel, docker },
     };
     return await runLoop(ctx, { limit, classifyIssues, runOneIssue, saveState });

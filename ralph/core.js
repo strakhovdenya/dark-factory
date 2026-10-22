@@ -5,6 +5,7 @@
 //   config.js    — core constants, local run config, state snapshot, lock
 //   github.js    — every git/gh call (the agent never does these itself), all with an explicit cwd
 //   workspace.js — the per-issue clone: installs, dependency sync, gate, DEL_RALPH, permissions
+//   steps/       — the step registry and the base steps; the pipeline the profile selects
 //   prompts.js   — every word the agent is told, for all four passes
 //   parsing.js   — pure parsing of the agent's output and of git porcelain
 //   agent.js     — runs `claude -p` in the sandbox and streams its output
@@ -12,14 +13,13 @@
 //   boundary.js  — controller-side checks after every agent turn
 //
 // `ctx` of a run: { consumerRoot, profile, settings (local run config), sandboxEnv, originUrl, env,
-// echo? (where the agent's live output goes; the process streams by default) }.
+// echo? (where the agent's live output goes; the process streams by default), stepRegistry? (the
+// default registry when absent) }.
 
 const fs = require('node:fs');
 const path = require('node:path');
 const {
   DEFAULT_REVIEW_MAX_TURNS,
-  MAX_REVIEW_FIX_ATTEMPTS,
-  MAX_CODE_REVIEW_FIX_ATTEMPTS,
   DEFAULT_AGENT_TIMEOUT_MINUTES,
   DEFAULT_TASK_MAX_MINUTES,
   DEFAULT_TASK_MAX_USD,
@@ -28,7 +28,6 @@ const {
 const {
   git,
   gitPorcelainStatus,
-  reviewDiff,
   defaultBranchOf,
   listRemoteBranches,
   branchesOfIssue,
@@ -42,12 +41,9 @@ const {
   createPr,
 } = require('./github');
 const workspace = require('./workspace');
-const { buildPrompt, buildFixPrompt, buildReviewPrompt, buildCodeReviewPrompt, missingRequiredSkills } = require('./prompts');
+const { missingRequiredSkills } = require('./prompts');
 const {
   hasCodeChanges,
-  parseVerdict,
-  parseReviewVerdict,
-  parseCodeReviewVerdict,
   extractAffectsSection,
   extractAcceptanceCriteriaItems,
   parseAcceptanceCriteriaSelfReport,
@@ -58,6 +54,12 @@ const { runAgent } = require('./agent');
 const sandbox = require('./sandbox');
 const { buildAgentEnv, parseStatusZ, findProtectedChanges, findUndeclaredToolingChanges, gitMetaFingerprint, createTaskBudget } = require('./boundary');
 const { branchNameFor } = require('../profile/branch');
+const { DEFAULT_REGISTRY, STEP_OUTCOMES, resolvePipeline } = require('./steps/registry');
+
+const PASSED = ['passed', 'passed-out-of-scope'];
+
+// An outcome of a kind the controller does not know is treated as an unreadable verdict.
+const checkedOutcome = (outcome) => (STEP_OUTCOMES.includes(outcome?.kind) ? outcome : { kind: 'unparseable' });
 
 // Agent's self-reported AC progress for a BLOCKED comment. `agentOutput` must be the output of the
 // agent call that produced the state being blocked on. null (the comment omits the line) when there
@@ -157,6 +159,12 @@ async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
   } catch (error) {
     return { status: 'prepare_failed', error: `Configuration error: branchTemplate: ${error.message}` };
   }
+  let pipeline;
+  try {
+    pipeline = resolvePipeline(profile, ctx.stepRegistry ?? DEFAULT_REGISTRY);
+  } catch (error) {
+    return { status: 'prepare_failed', error: error.message };
+  }
   const runDir = workspace.runDirFor(sandboxEnv.runsRoot, chosen.id);
   const sessionsRoot = workspace.runSessionsDirFor(sandboxEnv.runsRoot, chosen.id);
   const { sandboxConfig, docker } = sandboxEnv;
@@ -213,6 +221,7 @@ async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
         installBox: { ...networked, installEnv: sandboxConfig.installEnv, logsDir: sessionsRoot },
         gateRunner: ops.createSandboxGateRunner(runDir, base),
         skillNames: [],
+        pipeline,
       };
     } catch (error) {
       return { status: 'prepare_failed', error: error.message, runDir };
@@ -241,10 +250,9 @@ async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
 
 async function runIssueInClone(ctx, chosen, run) {
   const { profile, settings } = ctx;
-  const { runDir, sessionsRoot, branchName, baseRef, agentTimeoutMs, agentModel, stepLimit, agentSandbox, installBox, gateRunner, skillNames } = run;
+  const { runDir, sessionsRoot, branchName, baseRef, agentTimeoutMs, agentModel, stepLimit, agentSandbox, installBox, gateRunner, skillNames, pipeline } = run;
   const reviewMaxTurns = settings.reviewMaxTurns ?? DEFAULT_REVIEW_MAX_TURNS;
   const docOnlyPatterns = profile.docOnlyPathPatterns || [];
-  const verdictName = profile.ralph.humanNeededVerdict;
   const promptCtx = { profile, maxTurns: settings.maxTurns, skillNames };
 
   // Baseline for the .git/ check, taken after the controller's own setup (clone, push URL, deps).
@@ -256,9 +264,9 @@ async function runIssueInClone(ctx, chosen, run) {
   });
   stepLimit.remainingMs = () => Math.max(MIN_SANDBOX_STEP_MS, Math.min(agentTimeoutMs, budget.remainingMs()));
 
-  // Every agent call of this issue: whole-task budget first (no new call once it is spent), then
-  // the scrubbed env, the per-call timeout and what is left of the USD budget. Each call gets its
-  // own session dir, named `<seq>-<pass>`.
+  // Every agent call of this issue, of any step or fix: whole-task budget first (no new call once
+  // it is spent), then the scrubbed env, the per-call timeout and what is left of the USD budget.
+  // Each call gets its own session dir, named `<seq>-<pass>`.
   let agentCallSeq = 0;
   const callAgent = async (prompt, maxTurns, pass) => {
     const exhausted = budget.exhaustedReason();
@@ -285,8 +293,9 @@ async function runIssueInClone(ctx, chosen, run) {
     return reason ? block(ctx, chosen, reason, { coverage: coverageFor(chosen, agentOutput) }) : null;
   };
 
-  // Read-only passes must leave the tree exactly as they found it.
-  const runReadOnlyPass = async (prompt, pass) => {
+  // Read-only calls must leave the tree exactly as they found it — compared with the state right
+  // before this call, so an allowed fix between two review calls does not count.
+  const runReadOnlyCall = async (prompt, pass) => {
     const statusBefore = workspace.gitStatusZ(runDir);
     const result = await callAgent(prompt, reviewMaxTurns, pass);
     const boundaryBlock = blockOnBoundary(null);
@@ -298,157 +307,147 @@ async function runIssueInClone(ctx, chosen, run) {
   };
 
   // DEL_RALPH renames after a DONE; a still-red gate afterwards is BLOCKED.
-  const applyDelRalph = (diff, agentOutput) => {
-    const delRalph = workspace.handleDelRalphMarkers(runDir, profile, diff, gateRunner);
+  const applyDelRalph = (porcelain, agentOutput) => {
+    const delRalph = workspace.handleDelRalphMarkers(runDir, profile, porcelain, gateRunner);
     if (!delRalph.blockedReason) return { diff: delRalph.porcelain, blocked: null };
     return { diff: delRalph.porcelain, blocked: block(ctx, chosen, delRalph.blockedReason, { coverage: coverageFor(chosen, agentOutput) }) };
   };
 
-  // A BLOCKED or human-needed verdict of the implementer or of a fixer.
-  const blockOnVerdict = (verdict, agentOutput) =>
-    block(ctx, chosen, verdict.reason, { humanNeeded: verdict.kind === 'human-needed', coverage: coverageFor(chosen, agentOutput) });
-  const isBlockedVerdict = (verdict) => verdict.kind === 'blocked' || verdict.kind === 'human-needed';
+  // A BLOCKED or human-needed verdict of a write call.
+  const blockOnVerdict = (outcome, agentOutput) =>
+    block(ctx, chosen, outcome.reason, { humanNeeded: outcome.kind === 'human-needed', coverage: coverageFor(chosen, agentOutput) });
 
-  const agentResult = await callAgent(buildPrompt(chosen, promptCtx), settings.maxTurns, 'implement');
-  {
-    const boundaryBlock = blockOnBoundary(agentResult.output);
-    if (boundaryBlock) return boundaryBlock;
-  }
-  if (!agentResult.ok) {
-    return { status: 'agent_failed', error: agentResult.error, runDir };
-  }
-
-  // `verdict` stays the implementation's DONE for the rest of the run: its TYPE/SUMMARY name the
-  // commit and the PR. A review-driven fix is recorded in `reviewFixSummaries` instead, shown in
-  // the issue comment. `finalOutput` follows the latest agent call: its self-report reflects the
-  // code as it stands, for the acceptance report.
-  const verdict = parseVerdict(agentResult.output, verdictName);
+  // `verdict` is the first passed write call (implement, always the first step) for the rest of
+  // the run: its TYPE/SUMMARY name the commit and the PR. A review fix is recorded in
+  // `reviewFixSummaries` instead, shown in the issue comment. `finalOutput` follows the latest
+  // write call: its self-report reflects the code as it stands, for the acceptance report. `diff`
+  // is the current porcelain; the steps read it through `stepCtx`.
+  let verdict = null;
   const reviewFixSummaries = [];
-  let finalOutput = agentResult.output;
+  let finalOutput = '';
+  let diff = '';
+  const stepCtx = Object.freeze({
+    chosen,
+    profile,
+    runDir,
+    gateRunner,
+    promptCtx,
+    get diff() {
+      return diff;
+    },
+  });
+  const steps = [];
+  const finish = (result) => ({ ...result, steps });
+  const stop = (stopped, kind) => ({ stopped, outcome: { kind } });
 
-  if (isBlockedVerdict(verdict)) return blockOnVerdict(verdict, agentResult.output);
-  if (verdict.kind !== 'done') {
-    return { status: 'agent_failed', error: 'agent did not return DONE or BLOCKED', runDir, output: agentResult.output.slice(-2000) };
-  }
+  // One call with write access (a writes step or a fix): the named permission profile, the call,
+  // the boundary, the verdict, then a non-empty diff and DEL_RALPH.
+  const runWriteCall = async ({ pass, prompt, permissions, parseOutput, who }) => {
+    workspace.writePermissionProfile(permissions, runDir, profile, skillNames);
+    const result = await callAgent(prompt, settings.maxTurns, pass);
+    const boundaryBlock = blockOnBoundary(result.output);
+    if (boundaryBlock) return stop(boundaryBlock, 'blocked');
+    if (!result.ok) return stop({ status: 'agent_failed', error: result.error, runDir }, 'error');
+    const outcome = checkedOutcome(parseOutput(result.output, stepCtx));
+    if (outcome.kind === 'blocked' || outcome.kind === 'human-needed') return stop(blockOnVerdict(outcome, result.output), outcome.kind);
+    if (outcome.kind !== 'passed') {
+      return stop({ status: 'agent_failed', error: `${who} did not return DONE or BLOCKED`, runDir, output: result.output.slice(-2000) }, outcome.kind);
+    }
+    const porcelain = gitPorcelainStatus({ cwd: runDir });
+    if (!porcelain) return stop({ status: 'validate_failed', error: `${who} said DONE but produced no diff`, runDir }, 'error');
+    const delRalph = applyDelRalph(porcelain, result.output);
+    diff = delRalph.diff;
+    if (delRalph.blocked) return stop(delRalph.blocked, 'blocked');
+    finalOutput = result.output;
+    return { stopped: null, outcome };
+  };
 
-  let diff = gitPorcelainStatus({ cwd: runDir });
-  if (!diff) {
-    return { status: 'validate_failed', error: 'agent said DONE but produced no diff', runDir };
-  }
-  {
-    const result = applyDelRalph(diff, finalOutput);
-    diff = result.diff;
-    if (result.blocked) return result.blocked;
-  }
+  // A step outcome that stops the run: BLOCKED with the step's status.
+  const blockOnOutcome = (step, outcome, fixes) => {
+    const label = step.label ?? step.name;
+    const details = outcome.reason ?? `${label} returned ${outcome.kind}`;
+    let reason = details;
+    if (outcome.kind === 'unparseable') reason = `${label} did not return a clear PASS/FAIL verdict — treating as blocked out of caution.`;
+    if (outcome.kind === 'failed' && step.kind === 'agent') reason = `${label} still found a real issue after ${fixes} fix attempt(s): ${details}`;
+    const humanNeeded = outcome.kind === 'human-needed';
+    return block(ctx, chosen, reason, { status: step.blockedStatus ?? 'blocked', humanNeeded, coverage: coverageFor(chosen, finalOutput) });
+  };
 
-  // One review loop: a read-only pass, and on a real finding up to `maxFixes` point-fix ->
-  // re-review cycles (a separate agent call each) before BLOCKED. Doc-only diffs skip it.
-  const reviewLoop = async ({ name, maxFixes, buildReview, writePermissions, parseReview, passName, fixPassName, blockedStatus, failedStatus }) => {
-    let attempt = 0;
-    for (;;) {
-      console.log(`🔎 ${name} для issue #${chosen.id} (попытка ${attempt + 1}/${maxFixes + 1})...`);
-      writePermissions(runDir, profile);
-      const pass = await runReadOnlyPass(buildReview(), passName);
-      if (pass.blocked) return pass.blocked;
-      if (!pass.result.ok) return { status: failedStatus, error: pass.result.error, runDir };
+  const runWritesStep = async (step) => {
+    const prompt = step.buildPrompt(stepCtx);
+    const call = await runWriteCall({ pass: step.name, prompt, permissions: step.permissions, parseOutput: step.parseOutput, who: 'agent' });
+    if (!call.stopped && verdict === null) verdict = call.outcome;
+    return call;
+  };
 
-      const reviewVerdict = parseReview(pass.result.output);
-      if (reviewVerdict.kind === 'pass') {
-        console.log(`✅ ${name} пройден для issue #${chosen.id}.`);
-        return null;
+  // A read-only call and, on a fixable failure, up to the step's budget of fix -> re-check cycles
+  // (a separate write call each) before BLOCKED.
+  const runReadOnlyStep = async (step) => {
+    const label = step.label ?? step.name;
+    const maxFixes = step.fix ? pipeline.budgets.get(step.name) : 0;
+    for (let fixes = 0; ; fixes++) {
+      console.log(`🔎 ${label} для issue #${chosen.id} (попытка ${fixes + 1}/${maxFixes + 1})...`);
+      workspace.writePermissionProfile(step.permissions, runDir, profile, skillNames);
+      const call = await runReadOnlyCall(step.buildPrompt(stepCtx), step.name);
+      if (call.blocked) return stop(call.blocked, 'blocked');
+      if (!call.result.ok) return stop({ status: step.failedStatus ?? 'agent_failed', error: call.result.error, runDir }, 'error');
+      const outcome = checkedOutcome(step.parseOutput(call.result.output, stepCtx));
+      if (PASSED.includes(outcome.kind)) {
+        console.log(`✅ ${label} пройден для issue #${chosen.id}.`);
+        return { stopped: null, outcome };
       }
-      if (reviewVerdict.kind === 'pass-out-of-scope') {
-        console.log(`✅ ${name} пройден для issue #${chosen.id} — есть находки вне скоупа этой issue, не блокируют: ${reviewVerdict.reason}`);
-        try {
-          postOutOfScopeNote(ctx, chosen.id, reviewVerdict.reason);
-        } catch (error) {
-          console.log(`⚠️ Не удалось записать out-of-scope находку в issue #${chosen.id}: ${error.message}`);
-        }
-        return null;
-      }
-      const isUnparseable = reviewVerdict.kind !== 'fail';
-      if (isUnparseable || attempt >= maxFixes) {
-        const reason = isUnparseable
-          ? `${name} did not return a clear PASS/FAIL verdict — treating as blocked out of caution.`
-          : `${name} still found a real issue after ${attempt} fix attempt(s): ${reviewVerdict.reason}`;
-        return block(ctx, chosen, reason, { status: blockedStatus, coverage: coverageFor(chosen, finalOutput) });
-      }
+      if (outcome.kind !== 'failed' || fixes >= maxFixes) return stop(blockOnOutcome(step, outcome, fixes), outcome.kind);
 
-      console.log(`🔧 ${name} нашёл проблему для issue #${chosen.id}, пробую точечный фикс: ${reviewVerdict.reason}`);
-      workspace.writeAgentPermissions(runDir, profile, skillNames);
-      const fixResult = await callAgent(buildFixPrompt(chosen, reviewVerdict.reason, promptCtx), settings.maxTurns, fixPassName);
-      const boundaryBlock = blockOnBoundary(fixResult.output);
-      if (boundaryBlock) return boundaryBlock;
-      if (!fixResult.ok) return { status: 'agent_failed', error: fixResult.error, runDir };
-
-      const fixVerdict = parseVerdict(fixResult.output, verdictName);
-      if (isBlockedVerdict(fixVerdict)) return blockOnVerdict(fixVerdict, fixResult.output);
-      if (fixVerdict.kind !== 'done') {
-        return { status: 'agent_failed', error: `${fixPassName} agent did not return DONE or BLOCKED`, runDir, output: fixResult.output.slice(-2000) };
-      }
-      diff = gitPorcelainStatus({ cwd: runDir });
-      if (!diff) return { status: 'validate_failed', error: `${fixPassName} agent said DONE but produced no diff`, runDir };
-      const delRalph = applyDelRalph(diff, fixResult.output);
-      diff = delRalph.diff;
-      if (delRalph.blocked) return delRalph.blocked;
-
-      reviewFixSummaries.push(fixVerdict.summary);
-      finalOutput = fixResult.output;
-      attempt++;
+      console.log(`🔧 ${label} нашёл проблему для issue #${chosen.id}, пробую точечный фикс: ${outcome.reason}`);
+      const { fix } = step;
+      const prompt = fix.buildPrompt(stepCtx, outcome.reason ?? '');
+      const fixCall = await runWriteCall({ pass: fix.pass, prompt, permissions: fix.permissions, parseOutput: fix.parseOutput, who: `${fix.pass} agent` });
+      if (fixCall.stopped) return fixCall;
+      reviewFixSummaries.push(fixCall.outcome.summary ?? `${fix.pass} (no summary)`);
     }
   };
 
-  if (hasCodeChanges(diff, docOnlyPatterns)) {
-    const stopped = await reviewLoop({
-      name: 'Self-review (Ralph loop review pass)',
-      maxFixes: MAX_REVIEW_FIX_ATTEMPTS,
-      buildReview: () => buildReviewPrompt(chosen, reviewDiff(runDir), promptCtx),
-      writePermissions: workspace.writeReviewerPermissions,
-      parseReview: parseReviewVerdict,
-      passName: 'self-review',
-      fixPassName: 'review-fix',
-      blockedStatus: 'review_blocked',
-      failedStatus: 'review_failed',
-    });
-    if (stopped) return stopped;
-  }
+  const runCheckStep = async (step) => {
+    // A throw is not an outcome: like any controller error it ends the run as `crashed`, it does
+    // not block the issue.
+    const outcome = checkedOutcome(await step.run(stepCtx));
+    if (PASSED.includes(outcome.kind)) return { stopped: null, outcome };
+    return stop(blockOnOutcome(step, outcome, 0), outcome.kind);
+  };
 
-  // The second, independent pass runs only after self-review passed; `diff` is current (a fix may
-  // have changed it).
-  if (hasCodeChanges(diff, docOnlyPatterns)) {
-    const stopped = await reviewLoop({
-      name: 'Code-review (Ralph loop, code-review skill)',
-      maxFixes: MAX_CODE_REVIEW_FIX_ATTEMPTS,
-      buildReview: () => buildCodeReviewPrompt(chosen, promptCtx),
-      writePermissions: workspace.writeCodeReviewPermissions,
-      parseReview: parseCodeReviewVerdict,
-      passName: 'code-review',
-      fixPassName: 'code-review-fix',
-      blockedStatus: 'code_review_blocked',
-      failedStatus: 'code_review_failed',
-    });
-    if (stopped) return stopped;
-  }
+  const runStep = (step) => {
+    if (step.kind === 'check') return runCheckStep(step);
+    if (step.mode === 'writes') return runWritesStep(step);
+    return runReadOnlyStep(step);
+  };
 
-  // Dependency sync after the last agent pass and before the final gate: the agent cannot install,
-  // so a manifest it changed is synchronized here with the profile's commands, in the sandbox.
-  {
-    const sync = workspace.syncDependencies(runDir, profile, gitPorcelainStatus({ cwd: runDir }), installBox);
-    if (!sync.ok) {
-      return block(ctx, chosen, sync.blockedReason, { status: 'dependency_sync_blocked', coverage: coverageFor(chosen, finalOutput) });
+  for (const [index, step] of pipeline.steps.entries()) {
+    // Dependency sync after every earlier step and right before the last one (the final gate),
+    // doc-only diffs included: the agent cannot install, so a manifest it changed is synchronized
+    // here with the profile's commands, in the sandbox. The gate sees the refreshed diff.
+    if (index === pipeline.steps.length - 1) {
+      const sync = workspace.syncDependencies(runDir, profile, gitPorcelainStatus({ cwd: runDir }), installBox);
+      if (!sync.ok) {
+        steps.push({ name: step.name, outcome: 'blocked' });
+        return finish(block(ctx, chosen, sync.blockedReason, { status: 'dependency_sync_blocked', coverage: coverageFor(chosen, finalOutput) }));
+      }
+      if (sync.ran) diff = gitPorcelainStatus({ cwd: runDir });
     }
-    if (sync.ran) diff = gitPorcelainStatus({ cwd: runDir });
-  }
-
-  // Independent final gate right before commit/push/PR, after every review/fix cycle — not the
-  // agent's self-report and not an earlier, possibly stale result. Skipped only for a doc-only diff.
-  if (hasCodeChanges(diff, docOnlyPatterns)) {
-    console.log(`🔒 Финальный гейт перед коммитом для issue #${chosen.id}...`);
-    const finalGate = workspace.runProjectGateForPorcelain(runDir, profile, diff, gateRunner);
-    if (!finalGate.ok) {
-      return block(ctx, chosen, `Финальный гейт перед коммитом красный — PR не создаётся:\n\n${finalGate.output}`, { status: 'final_gate_blocked', coverage: coverageFor(chosen, finalOutput) });
+    if (step.skipOnDocOnly && !hasCodeChanges(diff, docOnlyPatterns)) {
+      steps.push({ name: step.name, outcome: 'skipped' });
+      continue;
     }
-    console.log(`✅ Финальный гейт зелёный для issue #${chosen.id}.`);
+    const { stopped, outcome } = await runStep(step);
+    steps.push({ name: step.name, outcome: outcome.kind });
+    if (stopped) return finish(stopped);
+    if (outcome.kind === 'passed-out-of-scope') {
+      console.log(`✅ ${step.label ?? step.name}: находки вне скоупа issue #${chosen.id}, не блокируют: ${outcome.reason}`);
+      try {
+        postOutOfScopeNote(ctx, chosen.id, outcome.reason);
+      } catch (error) {
+        console.log(`⚠️ Не удалось записать out-of-scope находку в issue #${chosen.id}: ${error.message}`);
+      }
+    }
   }
 
   // The controller's own commit/push run git on the host next. Nothing that ran after the last
@@ -456,10 +455,10 @@ async function runIssueInClone(ctx, chosen, run) {
   // protected path, so the boundary is checked once more right here.
   {
     const boundaryBlock = blockOnBoundary(finalOutput);
-    if (boundaryBlock) return boundaryBlock;
+    if (boundaryBlock) return finish(boundaryBlock);
   }
 
-  return publishChanges(ctx, { runDir, chosen, verdict, branchName, baseRef, finalOutput, reviewFixSummaries });
+  return finish(publishChanges(ctx, { runDir, chosen, verdict, branchName, baseRef, finalOutput, reviewFixSummaries }));
 }
 
 // What the controller reports about the acceptance criteria after a successful PR. Boxes are
