@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 // Directories whose contents ship to projects. Adding a package directory is a deliberate layout change.
-const PACKAGE_DIRS = ['skills', 'agents', 'hooks', 'profile', 'verifier', 'judge'];
+const PACKAGE_DIRS = ['skills', 'agents', 'hooks', 'profile', 'verifier', 'judge', 'ralph'];
 // Development-only directories that must never be published.
 const FORBIDDEN_PREFIXES = ['.claude', '.factory'];
 

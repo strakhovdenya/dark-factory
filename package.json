@@ -9,13 +9,14 @@
     "hooks/",
     "profile/",
     "verifier/",
-    "judge/"
+    "judge/",
+    "ralph/"
   ],
   "scripts": {
     "postinstall": "node .claude/scripts/setup-metaskills.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\""
+    "test": "node --test \"*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"ralph/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\""
   },
   "engines": {
     "node": ">=22"

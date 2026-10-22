@@ -41,5 +41,11 @@
     "No access to the real Supabase (neither database nor auth).",
     "No browser and no Playwright tools."
   ],
+  "sandbox": {
+    "image": "cards-ralph-sandbox:local",
+    "nodeVersion": "22",
+    "claudeCodeVersion": "2.1.283",
+    "allowedHosts": ["registry.npmjs.org", "api.anthropic.com"]
+  },
   "ralph": { "enabled": true, "techDebtTrackerIssue": 1, "enabledSteps": [], "humanNeededVerdict": "BLOCKED-DB-CHANGE" }
 }

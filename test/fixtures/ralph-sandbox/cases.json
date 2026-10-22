@@ -1,0 +1,280 @@
+{
+  "description": "Map of every test of the reference sandbox suite (source/sandbox.test.js.txt, a verbatim snapshot) to where its assertions are verified in the factory. Data only, not executable tests. 'portable' cases run under npm test (ralph/sandbox.test.js) with the processes replaced at the child_process boundary. 'integration' cases need a real Docker engine and belong to the Docker integration task (test/integration/ralph-sandbox.test.js, created there after the controller move); until that task they are NOT verified, and no portable test stands in for them.",
+  "source": {
+    "repository": "reference consumer project (jobflow)",
+    "commit": "8ecb667",
+    "path": ".claude/ralph/sandbox.test.js",
+    "snapshot": "test/fixtures/ralph-sandbox/source/sandbox.test.js.txt"
+  },
+  "destinations": {
+    "portable": "ralph/sandbox.test.js, task #18",
+    "integration": "test/integration/ralph-sandbox.test.js, task #46",
+    "both": "the argument-building part is portable (#18), the part that needs a real container is integration (#46)"
+  },
+  "cases": [
+    {
+      "source": "sandbox does not see operator HOME marker",
+      "assertions": [
+        "a marker file in the operator HOME is not visible through $HOME inside the container",
+        "the host path of the marker does not exist inside the container",
+        "a find over the container filesystem does not find the marker"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46)"
+    },
+    {
+      "source": "rejects sandbox config mounting operator home",
+      "assertions": [
+        "buildRunArgs rejects runDir equal to the home, runDir inside the home, sessionsDir ~/.claude",
+        "HOME or USERPROFILE of the given env define the home as well",
+        "isInsideHome is true for the home and for ~/.ssh"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"rejects unsafe mount specifications\"",
+      "status": "ported"
+    },
+    {
+      "source": "accepts sandbox config mounting only run dir",
+      "assertions": [
+        "mounts are exactly the clone, its .git read-only and the sessions dir, in this order, for readOnlyGit",
+        "only the clone is mounted without sessionsDir; the clone and the sessions dir with it",
+        "no -v, --volume, --tmpfs or --volumes-from"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"preserves mount and workdir boundaries\"",
+      "status": "ported"
+    },
+    {
+      "source": "sandbox returns empty git credentials",
+      "assertions": [
+        "a credential helper works on the controller side",
+        "inside the sandbox `git credential fill` returns no password and fails",
+        "the sandbox HOME has no .ssh content"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46)"
+    },
+    {
+      "source": "sandbox has no operator gh config",
+      "assertions": [
+        "$HOME/.config/gh and its hosts.yml do not exist in the container"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46)"
+    },
+    {
+      "source": "sandbox blocks request to foreign host",
+      "assertions": [
+        "through the real proxy a CONNECT to a foreign name and to an IP gets 403",
+        "a direct connection to an IP and to a name does not connect from the proxied network"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46); the proxy decision itself is covered by the portable case 'proxy policy ...' entries"
+    },
+    {
+      "source": "gate sandbox has no network",
+      "assertions": [
+        "with network none a direct connection to an IP and to a name does not connect",
+        "the only network interface is lo"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46)"
+    },
+    {
+      "source": "proxy policy allows allowlisted host",
+      "assertions": [
+        "CONNECT:443 to each allowlisted host is allowed, also in upper case",
+        "parseAuthority parses host:443"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"proxy follows profile allowlist\"",
+      "status": "ported"
+    },
+    {
+      "source": "proxy policy rejects non-CONNECT and non-443",
+      "assertions": [
+        "GET, POST, PUT, lower-case connect and an empty method are refused",
+        "ports 80, 22, 8443, 4430, 0 and undefined are refused",
+        "parseAuthority returns null for a bare host and for a URL"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"proxy follows profile allowlist\"",
+      "status": "ported"
+    },
+    {
+      "source": "proxy policy rejects subdomain of allowlisted host",
+      "assertions": [
+        "a subdomain, a deeper subdomain, the host as a prefix of another domain, a look-alike name and an IP are refused"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"proxy follows profile allowlist\"",
+      "status": "ported"
+    },
+    {
+      "source": "rejects allowlist entry that is not a host name",
+      "assertions": [
+        "scheme, port, path, IPv4, IPv6, empty, number, null, wildcard, single label and leading dash are rejected",
+        "an empty list and a string instead of a list are rejected",
+        "a valid entry is kept"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"rejects malformed allowlist, node and claude versions\"",
+      "status": "ported"
+    },
+    {
+      "source": "rejects unpinned claude-code version",
+      "assertions": [
+        "ranges, x-ranges, short versions, latest, next, pre-release, build metadata, empty and numbers are rejected",
+        "an exact X.Y.Z is accepted"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"rejects malformed allowlist, node and claude versions\"",
+      "status": "ported"
+    },
+    {
+      "source": "builds image from controller repo with pinned versions",
+      "assertions": [
+        "the build command is `build`, the last argument is the sandbox directory with a Dockerfile",
+        "-t image, NODE_VERSION, CLAUDE_CODE_VERSION and the named context `ralph` are given"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"builds image from installed package assets\"",
+      "status": "ported (the files are the installed package's, not the controller checkout's)"
+    },
+    {
+      "source": "files written in sandbox are owned by controller user",
+      "assertions": [
+        "a file written in the bind mount belongs to the host user (POSIX)"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46)"
+    },
+    {
+      "source": "git works inside sandbox on run dir",
+      "assertions": [
+        "git status and git diff work in the mounted clone with another owner",
+        "no 'dubious ownership' error"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46)"
+    },
+    {
+      "source": "agent session journals persist after container exit",
+      "assertions": [
+        "after a normal run and after a timeout the session journal is in the sessions dir on the host",
+        "a timed-out run reports 'timed out'"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker and the agent/workspace modules of the controller task (#45, #46)"
+    },
+    {
+      "source": "session journals stay outside run dir clone",
+      "assertions": [
+        "the journal is in the sessions dir, outside the clone",
+        "git status of the clone is clean after the run"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker and the agent/workspace modules of the controller task (#45, #46)"
+    },
+    {
+      "source": "container is labelled with run id",
+      "assertions": [
+        "run arguments carry the run label and the managed label with the root key",
+        "a started container is found by its run label"
+      ],
+      "destination": "both",
+      "portable": "ralph/sandbox.test.js \"preserves reference sandbox protections\"",
+      "status": "ported for the arguments; the running container part is not-run: needs Docker (#46)"
+    },
+    {
+      "source": "sandbox tests do not skip when runtime is missing",
+      "assertions": [
+        "assertAvailable throws 'Docker is not available' for a missing runtime",
+        "the integration file has no skip markers and fails in before() without a runtime"
+      ],
+      "destination": "both",
+      "portable": "ralph/sandbox.test.js \"preserves reference sandbox protections\"",
+      "status": "ported for assertAvailable and the absence of a host fallback; the no-skip guard of the integration file is not-run: it belongs to the integration file (#46)"
+    },
+    {
+      "source": "home check treats dotted names inside home as inside and follows links into home",
+      "assertions": [
+        "a name starting with two dots inside the home is inside; the parent of the home is not",
+        "a link (junction on Windows) whose target is in the home is inside, also with a child path",
+        "mounting a path through such a link is refused; a directory outside the home is outside"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"rejects unsafe mount specifications\"",
+      "status": "ported (with a controlled HOME and a target directory inside it); also \"rejects invalid or home located runs root\""
+    },
+    {
+      "source": "workdir outside the run dir is rejected",
+      "assertions": [
+        "'../workspace-other', '../workspaces', '..' and '../../etc' are rejected as escaping the run dir",
+        "'', '.', 'apps/api' and a Windows-style 'apps\\\\web' are accepted"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"preserves mount and workdir boundaries\" and \"rejects unsafe mount specifications\"",
+      "status": "ported"
+    },
+    {
+      "source": "proxy address goes to the container only, not to the docker CLI env",
+      "assertions": [
+        "HTTPS_PROXY=<proxy url> is a container argument",
+        "the secret is passed as -e NAME and its value never appears in argv"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"preserves secret and proxy environment boundaries\"",
+      "status": "ported (also checks the env given to the mocked Docker CLI)"
+    },
+    {
+      "source": "read-only git mount keeps the clone writable but .git unwritable",
+      "assertions": [
+        "inside the container the working tree is writable",
+        "writing a hook or the config under .git fails and nothing appears on the host"
+      ],
+      "destination": "integration",
+      "portable": null,
+      "status": "not-run: needs Docker (#46); the read-only mount argument is covered by the portable \"preserves mount and workdir boundaries\""
+    },
+    {
+      "source": "a sandbox step that exceeds its time limit is stopped",
+      "assertions": [
+        "the step returns a non-zero status and an error describing the timeout, within the limit",
+        "no container with the run label is left"
+      ],
+      "destination": "both",
+      "portable": "ralph/sandbox.test.js \"cleans up owned resources after failure\"",
+      "status": "ported with a replaced Docker CLI (timeout error, removal of the container, no host command); the real stop of a sleeping container is not-run: needs Docker (#46)"
+    },
+    {
+      "source": "install env may not override proxy or Docker settings",
+      "assertions": [
+        "HTTPS_PROXY, https_proxy, NO_PROXY, ALL_PROXY, DOCKER_*, GIT_*, GCM_*, GH_*, HOME and CLAUDE_CONFIG_DIR are rejected with 'installEnv may not set'",
+        "an ordinary variable is kept"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"rejects reserved env name in profile\"",
+      "status": "ported"
+    },
+    {
+      "source": "read-only git mount needs the clone own .git directory",
+      "assertions": [
+        "without a .git directory buildRunArgs is rejected with 'not a real directory'",
+        "with a real .git the readonly mount argument is present"
+      ],
+      "destination": "portable",
+      "portable": "ralph/sandbox.test.js \"rejects unsafe mount specifications\"",
+      "status": "ported (also a .git file and a .git link are rejected)"
+    }
+  ]
+}

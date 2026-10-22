@@ -37,5 +37,11 @@
     }
   ],
   "ruleFiles": ["CLAUDE.md", "packages/billing/CLAUDE.md"],
+  "sandbox": {
+    "image": "factory-sandbox-test:local",
+    "nodeVersion": "22",
+    "claudeCodeVersion": "1.2.3",
+    "allowedHosts": ["registry.example.org", "models.example.org"]
+  },
   "ralph": { "enabled": true, "techDebtTrackerIssue": 5, "enabledSteps": [] }
 }
