@@ -395,9 +395,9 @@ test('preserves mount and workdir boundaries', (t) => {
     assert.equal(valueAfter(built, '--network'), 'none');
   }
 
-  const nested = sandbox.buildRunArgs({ ...BOX, runDir: clone, workdir: 'apps\\web', command: ['true'] }, env);
-  assert.equal(valueAfter(nested, '-w'), '/workspace/apps/web');
-  for (const workdir of ['', '.', 'apps/api']) {
+  const nested = sandbox.buildRunArgs({ ...BOX, runDir: clone, workdir: 'packages\\two', command: ['true'] }, env);
+  assert.equal(valueAfter(nested, '-w'), '/workspace/packages/two');
+  for (const workdir of ['', '.', 'packages/one']) {
     assert.doesNotThrow(() => sandbox.buildRunArgs({ ...BOX, runDir: clone, workdir, command: ['true'] }, env), workdir);
   }
 });
