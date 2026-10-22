@@ -2,6 +2,7 @@
   "branchTemplate": "task/ISSUE-{issue}-{slug}",
   "githubProject": 1,
   "install": [{ "argv": ["npm", "install", "--ignore-scripts"], "cwd": "." }],
+  "dependencySync": [{ "argv": ["npm", "install", "--ignore-scripts"], "cwd": "." }],
   "apps": [
     {
       "name": "api",
@@ -9,6 +10,7 @@
       "install": [
         { "argv": ["npm", "install"], "cwd": "apps/api" }
       ],
+      "dependencySync": [{ "argv": ["npm", "install", "--ignore-scripts"], "cwd": "apps/api" }],
       "gate": [
         { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "apps/api" },
         { "argv": ["node", "node_modules/eslint/bin/eslint.js", "--fix-dry-run", "{src,libs,test}/**/*.ts"], "cwd": "apps/api" },
@@ -19,6 +21,7 @@
       "name": "web",
       "path": "apps/web",
       "install": [{ "argv": ["npm", "install"], "cwd": "apps/web" }],
+      "dependencySync": [{ "argv": ["npm", "install", "--ignore-scripts"], "cwd": "apps/web" }],
       "gate": [
         { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "apps/web" },
         { "argv": ["node", "node_modules/eslint/bin/eslint.js", "."], "cwd": "apps/web" },
@@ -26,7 +29,7 @@
       ]
     }
   ],
-  "docOnlyPathPatterns": ["*.md", "docs/", "project-management/"],
+  "docOnlyPathPatterns": ["**/*.md", "**/docs/", "**/project-management/"],
   "protectedPaths": [
     ".claude/",
     "scripts/",

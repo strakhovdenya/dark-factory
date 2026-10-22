@@ -6,6 +6,7 @@
       "name": "cards",
       "path": ".",
       "install": [{ "argv": ["npm", "install"], "cwd": "." }],
+      "dependencySync": [{ "argv": ["npm", "install", "--ignore-scripts"], "cwd": "." }],
       "gate": [
         { "argv": ["node", "node_modules/eslint/bin/eslint.js", ".", "--max-warnings=0"], "cwd": "." },
         { "argv": ["node", "node_modules/prettier/bin/prettier.cjs", "--check", "src/**/*.{js,jsx,ts,tsx,css,md,json}"], "cwd": "." },
@@ -14,7 +15,7 @@
       ]
     }
   ],
-  "docOnlyPathPatterns": ["*.md", "docs/"],
+  "docOnlyPathPatterns": ["**/*.md", "**/docs/"],
   "protectedPaths": [".claude/", "scripts/", ".github/", ".husky/", ".git/", "docs/"],
   "labels": { "humanNeeded": "ralph-needs-db-change" },
   "skillRules": [

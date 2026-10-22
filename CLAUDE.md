@@ -32,7 +32,7 @@ Rules of placement:
 1. No project literals in core code (paths, app names, DB/ORM names, label values of one project). `jobflow` and `cards` may appear only as names of consumer projects.
 2. A project PR cannot change verifier code or verifier config; they come from the pinned factory release.
 3. The verdict is computed by code, not by the model. An invalid profile or config → `FAIL`.
-4. The Ralph agent runs without git/gh; the controller does git and GitHub operations.
+4. The Ralph agent gets no `gh` and no git command that changes the repository. It may only read git: `git status`, `git diff`, `git log`, and in the review passes also `git show`. Branches, commits, push and every GitHub operation (PRs, comments, labels) belong to the controller.
 5. Updating the core in a project happens only through a PR that changes the pinned version.
 6. A new step or check is wired in by registration + profile and is **off by default**. The one exception is a mandatory diagnostic artifact of the round protocol, which has no switch. It adds no check, no model call and no authority, does not change the verdict, and a failure to form or publish it is isolated from the decision (it never fails the job that computes the verdict). The list is closed: `verdict-report` (job `Report`) and the policy snapshot (job `Verify`). `provenance.json` is not on it: it takes part in computing the verdict. A new artifact joins the list only by changing this paragraph.
 7. One "path → skills" table, shared by the hook and by Ralph.

@@ -465,3 +465,27 @@ test('rejects local runs root in project profile', (t) => {
     assert.throws(() => loadProfile(inSandbox), /sandbox\.runsRoot: unknown field/, fixture);
   }
 });
+
+test('dependency sync of root and apps uses shared command contract', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const sync = [{ argv: ['npm', 'install', '--ignore-scripts', '{file}'], cwd: '.' }];
+  for (const fixture of FIXTURE_PROFILES) {
+    assert.equal(loadProfile(profileCopy(t, fixture)).dependencySync, undefined, fixture);
+    const root = profileCopy(t, fixture, (profile) => {
+      profile.dependencySync = sync;
+      profile.apps[0].dependencySync = sync;
+    });
+    const loaded = loadProfile(root);
+    assert.deepEqual(loaded.dependencySync, sync, fixture);
+    assert.deepEqual(loaded.apps[0].dependencySync, sync, fixture);
+    assert.equal(loaded.apps[0].dependencySync[0].argv[3], '{file}', 'file token stays literal');
+
+    for (const { mutate, pattern } of [
+      { mutate: (profile) => (profile.dependencySync = [{ argv: [], cwd: '.' }]), pattern: /dependencySync\[0\]\.argv/ },
+      { mutate: (profile) => (profile.apps[0].dependencySync = [{ argv: ['npm'] }]), pattern: /apps\[0\]\.dependencySync\[0\]\.cwd/ },
+      { mutate: (profile) => (profile.dependencySync = 'npm install'), pattern: /dependencySync/ },
+    ]) {
+      assert.throws(() => loadProfile(profileCopy(t, fixture, mutate)), pattern, fixture);
+    }
+  }
+});

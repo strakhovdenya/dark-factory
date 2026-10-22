@@ -10,7 +10,7 @@ Projects install a pinned release of the package and supply project-specific val
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/` | Package sources (the `files` field of `package.json`) | yes |
+| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | yes |
 | `.claude/` | Tooling for developing the factory only | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repository | no |
@@ -20,6 +20,8 @@ The rules for working in this repository (core invariants, release cycle, task p
 ## Optional elements
 
 **Calibration Judge** (`judge/`, reusable workflow `.github/workflows/calibration-judge.yml`) analyses failed Acceptance Verifier rounds and attributes each failure to the issue, the implementation, the verifier or the infrastructure, so the owner can calibrate the verifier and the issue skills. It only observes: it never changes a verdict, a status or a label. It is **off by default**: a project turns it on with `judge.enabled: true` and `labels.calibration` in its profile and a short wrapper (`examples/wrappers/calibration-judge.yml`). Every verifier round stores a snapshot of the rules it used, so Judge reads the rules of a past round from that round and never from the project's current settings.
+
+**Ralph** (`ralph/`) executes GitHub issues of a consumer project with Claude Code in a Docker sandbox; its controller owns every git and GitHub operation. It is **off by default** (`ralph.enabled`) and is not ready to run from an installed package yet: [ralph/README.md](ralph/README.md) lists its inputs and the stages still missing. In this repository it stays disabled.
 
 ## Why plain JavaScript and not TypeScript
 
