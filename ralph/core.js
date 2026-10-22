@@ -145,6 +145,7 @@ const RUN_OPS = {
   startProxy: (spec, options) => sandbox.startProxy(spec, options),
   createSandboxGateRunner: workspace.createSandboxGateRunner,
   installDependencies: workspace.installDependencies,
+  runFactorySetup: workspace.runFactorySetup,
   listInstalledSkillNames: workspace.listInstalledSkillNames,
   writeAgentPermissions: workspace.writeAgentPermissions,
   runIssueInClone: (ctx, chosen, run) => runIssueInClone(ctx, chosen, run),
@@ -232,14 +233,15 @@ async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
     }
     try {
       ops.installDependencies(runDir, profile, run.installBox);
+      ops.runFactorySetup(runDir, run.installBox);
     } catch (error) {
       if (error instanceof workspace.InstallError) {
-        return block(ctx, chosen, `Dependency installation failed before the agent — no agent, no gate, no PR: ${error.message}`);
+        return block(ctx, chosen, `Preparing the clone (dependency installs, factory setup) failed before the agent — no agent, no gate, no PR: ${error.message}`);
       }
       return { status: 'prepare_failed', error: error.message, runDir };
     }
-    // Until the package sets up skills in the clone, a required skill that is not installed stops
-    // the issue before the agent: the agent could not load it.
+    // A required skill that setup did not install stops the issue before the agent: the agent
+    // could not load it.
     run.skillNames = ops.listInstalledSkillNames(runDir).filter((name) => name !== 'code-review');
     const missingSkills = missingRequiredSkills(profile, chosen.body, run.skillNames);
     if (missingSkills.length > 0) {

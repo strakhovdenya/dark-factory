@@ -10,12 +10,30 @@ Projects install a pinned release of the package and supply project-specific val
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | yes |
+| `bin/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | yes |
 | `.claude/` | Tooling for developing the factory only | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repository | no |
 
 The rules for working in this repository (core invariants, release cycle, task process) are in [CLAUDE.md](CLAUDE.md).
+
+## Installing skills and agents in a project
+
+`dark-factory-setup --consumer-root <path>` (`bin/setup.js`) lays out the whole base set of `skills/base-set.json` (process skills, JS metaskills, agents) plus the profile's `extraMetaskills` as plain copies in `<path>/.claude/skills/<name>/` and `<path>/.claude/agents/<name>.md`. The same file is the package's `postinstall`: with no argument it takes the git root found from `INIT_CWD` (the directory npm was started in, a subdirectory is fine). An explicit `--consumer-root` wins and must be the git root itself; the package directory is never a default, and no root or a root outside git is an error without writes. `code-review` (`runtimeSkills`) is bundled with the Claude CLI and is not copied. The profile is read only through `loadProfile`. Sources are the executing package and its pinned `metaskills` dependency (nested or hoisted); a missing source or a wrong version is an error, nothing is downloaded.
+
+Ownership. Copies setup made are listed in `.claude/.factory-installed.json` (`{ "format_version": 1, "copies": [...] }`). A repeated run updates those copies and removes the ones that left the base set or the profile, only if they have no tracked files. **A path that exists but is not in the list is foreign**, even if Git ignores it and its name equals a base skill: setup stops with a conflict naming the path and never adopts it. Old copies from before the list existed must be removed or moved by hand once. A tracked path is always a conflict.
+
+Git. Setup never changes tracked files, including `.gitignore`. The project must ignore every copy by name, plus the list:
+
+```gitignore
+.claude/.factory-installed.json
+.claude/skills/prd
+.claude/skills/js-gof
+.claude/agents/verify.md
+# ...one line per skill and agent of the set (a leading / and a trailing / for directories are fine)
+```
+
+A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md).
 
 ## Optional elements
 
@@ -37,7 +55,7 @@ TypeScript is used here only as a checker. Consuming projects are free to write 
 ## Commands
 
 ```sh
-npm install        # installs dev tooling and copies the JS metaskills into .claude/skills/
+npm install        # installs dev tooling; postinstall runs the repository's own metaskills bootstrap
 npm test           # node --test; no network, no real AI
 npm run lint       # ESLint
 npm run typecheck  # tsc --noEmit (checkJs)

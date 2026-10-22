@@ -12,13 +12,13 @@ This repo is developed by its owner in an interactive Claude Code session. Ralph
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | **yes** |
+| `bin/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | **yes** |
 | `.claude/` | Tooling for developing the factory only (its own scripts, settings, skills, agents) | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repo | no |
 
 Rules of placement:
-- Something a project must receive → package dirs (`skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/`).
+- Something a project must receive → package dirs (`bin/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/`).
 - Something only used while developing the factory → `.claude/`. Never put package sources there, and never let the factory's own skills/agents reach projects.
 - `.claude/` and `.factory/` are never part of the package.
 

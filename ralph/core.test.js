@@ -132,7 +132,11 @@ const runOps = (calls, overrides = {}) => ({
   },
   createSandboxGateRunner: () => () => 'ok',
   installDependencies: () => calls.push('installDependencies'),
-  listInstalledSkillNames: () => ['js-conventions', 'js-gof', 'js-data-structures', 'error-handling', 'modern-javascript'],
+  runFactorySetup: () => calls.push('runFactorySetup'),
+  listInstalledSkillNames: () => {
+    calls.push('listInstalledSkillNames');
+    return ['js-conventions', 'js-gof', 'js-data-structures', 'error-handling', 'modern-javascript'];
+  },
   writeAgentPermissions: () => calls.push('writeAgentPermissions'),
   runIssueInClone: async () => {
     calls.push('runIssueInClone');
@@ -143,9 +147,11 @@ const runOps = (calls, overrides = {}) => ({
 
 const unitContext = (t) => runContext(t, { consumerRoot: 'consumer', origin: 'origin', profile: controllerProfile(t, 'monorepo') });
 
-test('writes agent permissions after installing dependencies', async (t) => {
+test('writes agent permissions after installing dependencies and factory setup', async (t) => {
   const calls = [];
   await runIssue(unitContext(t), new Map(), CHOSEN, runOps(calls));
+  const order = ['startProxy', 'installDependencies', 'runFactorySetup', 'listInstalledSkillNames', 'writeAgentPermissions', 'runIssueInClone'];
+  assert.deepEqual(calls.filter((call) => order.includes(call)), order);
   assert.ok(calls.includes('createTaskBranch task/ISSUE-1-example origin/trunk'));
   assert.ok(calls.indexOf('installDependencies') > calls.indexOf('startProxy'));
   assert.ok(calls.indexOf('writeAgentPermissions') > calls.indexOf('installDependencies'));

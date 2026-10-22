@@ -347,6 +347,19 @@ function installDependencies(runDir, profile, box) {
   }
 }
 
+// The package's own setup, run from the factory release installed in the clone, after every
+// install: it lays out the skills and agents (.claude/) the permission list and the prompt are
+// built from. Same sandbox, read-only .git, install env and log as the installs; no host fallback,
+// no hidden `npm install`: a clone without the installed package fails here.
+const FACTORY_SETUP_SCRIPT = `${sandbox.CONTAINER_WORKDIR}/node_modules/dark-factory/bin/setup.js`;
+
+function runFactorySetup(runDir, box) {
+  const command = { argv: ['node', FACTORY_SETUP_SCRIPT, '--consumer-root', sandbox.CONTAINER_WORKDIR], cwd: '.' };
+  const step = 'factory-setup';
+  const result = runInstallStep(runDir, box, { label: step, command });
+  if (!result.ok) throw new InstallError(result.error, { step, logPath: result.logPath });
+}
+
 const MANIFEST = 'package.json';
 
 // Areas that serve a changed manifest: the root manifest is served by the root dependencySync and
@@ -517,6 +530,8 @@ module.exports = {
   runInstallStep,
   InstallError,
   installDependencies,
+  FACTORY_SETUP_SCRIPT,
+  runFactorySetup,
   syncDependencies,
   listInstalledSkillNames,
   READ_ONLY_GIT,
