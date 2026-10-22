@@ -577,3 +577,15 @@ test('sandbox mode does not write operator claude config', (t) => {
   prepareAgentSessionDir(tempDir(t), '01-implement');
   assert.equal(fs.readFileSync(operatorConfig, 'utf8'), original);
 });
+
+test('controller agent settings never show in the clone status or the commit', (t) => {
+  isolateGit(t);
+  const { origin } = makeConsumer(t);
+  const runsRoot = path.join(tempDir(t), 'runs');
+  const runDir = path.join(runsRoot, 'issue-1');
+  workspace.prepareClone(runsRoot, runDir, origin);
+  fs.writeFileSync(path.join(runDir, '.gitignore'), 'node_modules/\n');
+  gitIn(runDir, 'commit', '-qam', 'consumer without settings ignore');
+  writeAgentPermissions(runDir, fixtureProfile('single-package'), []);
+  assert.equal(workspace.gitStatusZ(runDir), '');
+});

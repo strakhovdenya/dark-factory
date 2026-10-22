@@ -72,7 +72,7 @@ Then: the lock (`<runsRoot>/run.lock`), the sandbox startup (Docker engine, left
 
 - **Git: read only.** Implementation and fix passes may run `git status`, `git diff`, `git log`; the self-review and code-review passes also `git show`. `git commit`, `git push` and every `gh` command are denied; no other git command is allowed. `.git` is mounted read-only in every sandbox phase. Branches, commits, push, PRs, comments and labels are done by the controller only.
 - **Check commands come from the profile gate.** For every `apps[].gate` command of every app, the agent and both reviewers get exactly two Bash rules: the argv joined with single spaces, and the same followed by ` *` for extra arguments. Example: `{ "argv": ["node", "node_modules/eslint/bin/eslint.js", "."] }` grants `Bash(node node_modules/eslint/bin/eslint.js .)` and `Bash(node node_modules/eslint/bin/eslint.js . *)`. Nothing broad is added (`Bash`, `Bash(*)`, `npm run`, a bare package runner), and install or sync commands are never granted. A profile without gate commands grants no check command. The prompts list the same commands with their cwd.
-- **Edits.** Edit/Write everywhere except the protected paths (deny rules); the review passes cannot edit at all.
+- **Edits.** Edit/Write everywhere except the protected paths (deny rules); the review passes cannot edit at all. The controller's own `.claude/settings.local.json` is excluded in the clone (`.git/info/exclude`), so it never counts as a change and is never committed.
 
 ## Protections kept for every project
 
@@ -119,7 +119,7 @@ The profile can add constraints but not switch these off:
 
 - Name: `branchNameFor(branchTemplate, issue, title)` from `profile/branch.js` (`{slug}`: lower-case title, non-alphanumeric runs as `-`, at most 50 characters, `issue` when empty).
 - An existing PR in any state, or a branch left on the remote, is found by `issueNumberOfBranch` of the same template, so a changed title does not create a second branch. A failed PR lookup leaves the issue unselected.
-- Base: the consumer's default branch from the clone (`refs/remotes/origin/HEAD`) for an independent issue or one whose dependency is merged; the dependency's task branch while it is not merged. An unresolvable default branch stops the issue before the agent.
+- Base: the consumer's default branch from the clone (`refs/remotes/origin/HEAD`) for an independent issue or one whose dependency is merged; the dependency's task branch while it is not merged (the remote branch the template recognizes as the dependency's, so a renamed dependency still works; its name by the current title when there is none). An unresolvable default branch stops the issue before the agent.
 
 ## Files
 

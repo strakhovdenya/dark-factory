@@ -87,3 +87,12 @@ test('reads sections by contract names and reconciles the self-report', () => {
   assert.equal(reconcileAcceptanceCriteria(items, report).allCovered, false);
   assert.deepEqual(summarizeSelfReportedCoverage(items, report), { covered: 1, total: 2 });
 });
+
+test('a later fail or blocked sentinel wins over an earlier pass or done', () => {
+  const review = parseReviewVerdict('REVIEW: FAIL: restated rule\nREVIEW: PASS\nREVIEW: FAIL: real bug\n');
+  assert.equal(review.kind, 'fail');
+  assert.equal(review.reason, 'real bug');
+  assert.equal(parseCodeReviewVerdict('CODEREVIEW: FAIL: quoted\nCODEREVIEW: PASS\nCODEREVIEW: FAIL: in scope\n').reason, 'in scope');
+  assert.deepEqual(parseVerdict('BLOCKED: maybe\nDONE\nTYPE: fix\nSUMMARY: s\nBLOCKED: final reason\n', 'HUMAN'), { kind: 'blocked', reason: 'final reason' });
+  assert.equal(parseVerdict('HUMAN: early\nDONE\nHUMAN: late\n', 'HUMAN').reason, 'late');
+});

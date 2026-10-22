@@ -180,6 +180,8 @@ test('branches from repository default branch', (t) => {
   assert.equal(independentBase, 'origin/trunk');
   assert.equal(resolveBaseRef(profile, byId, { id: 3, dependsOn: [6] }, defaultBranch), 'origin/trunk');
   assert.equal(resolveBaseRef(profile, byId, { id: 4, dependsOn: [5] }, defaultBranch), 'origin/task/ISSUE-5-dep-title');
+  const remote = ['trunk', 'task/ISSUE-50-x', 'task/ISSUE-5-title-before-rename'];
+  assert.equal(resolveBaseRef(profile, byId, { id: 4, dependsOn: [5] }, defaultBranch, remote), 'origin/task/ISSUE-5-title-before-rename', 'the existing branch of the dependency');
 
   workspace.createTaskBranch(runDir, 'task/ISSUE-2-x', independentBase);
   assert.equal(gitIn(runDir, 'rev-parse', 'HEAD'), gitIn(origin, 'rev-parse', 'trunk'));

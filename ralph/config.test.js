@@ -43,6 +43,8 @@ test('takes over the lock of a dead process or a corrupt lock file', (t) => {
     const lockPath = lockIn(t);
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });
     fs.writeFileSync(lockPath, content);
+    const old = new Date(Date.now() - 60000);
+    fs.utimesSync(lockPath, old, old);
     t.mock.method(console, 'log', () => {});
     acquireLock(lockPath, content.startsWith('{ not') ? alive : dead);
     t.mock.restoreAll();
@@ -80,4 +82,12 @@ test('reads the local config file and names it on errors', (t) => {
 test('core protections cannot be removed by the profile', () => {
   assert.deepEqual(protectedPatternsFor({}), [...CORE_PROTECTED_PATHS]);
   assert.deepEqual(protectedPatternsFor({ protectedPaths: ['scripts/'] }), [...CORE_PROTECTED_PATHS, 'scripts/']);
+});
+
+test('does not take over a lock file that another starter has just created', (t) => {
+  const lockPath = lockIn(t);
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  fs.writeFileSync(lockPath, '');
+  assert.throws(() => acquireLock(lockPath, dead), /is starting/);
+  assert.equal(fs.readFileSync(lockPath, 'utf8'), '');
 });

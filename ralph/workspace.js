@@ -58,11 +58,19 @@ function removeRunDirIfExists(runDir) {
 const DISABLED_PUSH_URL = 'no-push://ralph-agent-push-disabled';
 
 // `originUrl` is the origin of the consumer root (github.js originUrlOf()).
+// The agent settings the controller writes into the clone are excluded locally, so they never show
+// up in git status (where `.claude/` is protected) or in the commit, whatever the consumer's
+// .gitignore says. Written before the .git fingerprint baseline is taken.
+const CONTROLLER_LOCAL_FILES = ['/.claude/settings.local.json'];
+
 function prepareClone(runsRoot, runDir, originUrl) {
   fs.mkdirSync(runsRoot, { recursive: true });
   removeRunDirIfExists(runDir);
   git(['clone', originUrl, runDir], { cwd: runsRoot });
   git(['remote', 'set-url', '--push', 'origin', DISABLED_PUSH_URL], { cwd: runDir });
+  const exclude = path.join(runDir, '.git', 'info', 'exclude');
+  fs.mkdirSync(path.dirname(exclude), { recursive: true });
+  fs.appendFileSync(exclude, `\n${CONTROLLER_LOCAL_FILES.join('\n')}\n`);
 }
 
 function createTaskBranch(runDir, branchName, baseRef) {
@@ -198,6 +206,19 @@ function hasDelRalphMarker(head) {
 // A read right after a failed build in the same dir can transiently get EPERM/EBUSY on Windows;
 // two short retries ride out that race without masking a persistent failure.
 const MARKER_READ_RETRY_DELAYS_MS = [100, 250];
+const MARKER_HEAD_BYTES = 800;
+
+// Only the first bytes: the marker is on the first line, and a changed file can be large.
+function readHead(absPath) {
+  const fd = fs.openSync(absPath, 'r');
+  try {
+    const buffer = Buffer.alloc(MARKER_HEAD_BYTES);
+    const bytes = fs.readSync(fd, buffer, 0, MARKER_HEAD_BYTES, 0);
+    return buffer.subarray(0, bytes).toString('utf8').slice(0, 200);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
 
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -209,7 +230,7 @@ function readFileHeadForMarker(absPath) {
   let lastError;
   for (let attempt = 0; attempt <= MARKER_READ_RETRY_DELAYS_MS.length; attempt++) {
     try {
-      return fs.readFileSync(absPath, 'utf8').slice(0, 200);
+      return readHead(absPath);
     } catch (error) {
       lastError = error;
       if (error.code === 'ENOENT') throw error;

@@ -136,6 +136,16 @@ function readLock(lockPath) {
   }
 }
 
+const FRESH_LOCK_MS = 10000;
+
+const isFresh = (lockPath) => {
+  try {
+    return Date.now() - fs.statSync(lockPath).mtimeMs < FRESH_LOCK_MS;
+  } catch {
+    return false;
+  }
+};
+
 // The lock file is created exclusively (`wx`), so two starters cannot both win. An existing lock
 // is taken over only when it is unreadable/corrupt or its process is gone; the takeover removes
 // the file and retries the exclusive create once, so a racing starter still loses cleanly.
@@ -152,6 +162,11 @@ function acquireLock(lockPath, isAlive = isProcessAlive) {
     const prior = readLock(lockPath);
     if (prior && isAlive(prior.pid)) {
       throw new Error(`Another Ralph run is already active (PID ${prior.pid}, started ${prior.startedAt}). Refusing to start a second one.`);
+    }
+    // An unreadable lock this fresh is most likely another starter between its exclusive create
+    // and its write: it is not taken over.
+    if (!prior && isFresh(lockPath)) {
+      throw new Error('Another Ralph run is starting (its lock file was just created). Refusing to start a second one.');
     }
     console.log(prior ? `⚠️ Stale lock from PID ${prior.pid} (no longer running) — taking over.` : '⚠️ Corrupt lock file — taking over.');
     fs.rmSync(lockPath, { force: true });

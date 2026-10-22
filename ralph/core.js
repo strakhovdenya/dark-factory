@@ -151,7 +151,12 @@ const RUN_OPS = {
 // the prepare steps.
 async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
   const { consumerRoot, profile, settings, sandboxEnv } = ctx;
-  const branchName = branchNameFor(profile.branchTemplate, chosen.id, chosen.title);
+  let branchName;
+  try {
+    branchName = branchNameFor(profile.branchTemplate, chosen.id, chosen.title);
+  } catch (error) {
+    return { status: 'prepare_failed', error: `Configuration error: branchTemplate: ${error.message}` };
+  }
   const runDir = workspace.runDirFor(sandboxEnv.runsRoot, chosen.id);
   const sessionsRoot = workspace.runSessionsDirFor(sandboxEnv.runsRoot, chosen.id);
   const { sandboxConfig, docker } = sandboxEnv;
@@ -169,8 +174,10 @@ async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
 
   // A task branch left on the remote by an earlier run (whatever its slug) stops the issue here: no
   // clone, no agent, no push — a human decides what to do with that branch.
+  let remoteBranches;
   try {
-    const leftovers = branchesOfIssue(ops.listRemoteBranches(consumerRoot), profile.branchTemplate, chosen.id);
+    remoteBranches = ops.listRemoteBranches(consumerRoot);
+    const leftovers = branchesOfIssue(remoteBranches, profile.branchTemplate, chosen.id);
     if (leftovers.length > 0) {
       return { status: 'branch_exists', reason: `Ветка ${leftovers.join(', ')} уже есть на remote (остаток прошлого запуска). Удалите её или разберите вручную, затем перезапустите Ральфа.` };
     }
@@ -181,7 +188,7 @@ async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
   let baseRef;
   try {
     ops.prepareClone(sandboxEnv.runsRoot, runDir, ctx.originUrl);
-    baseRef = resolveBaseRef(profile, byId, chosen, ops.defaultBranchOf(runDir));
+    baseRef = resolveBaseRef(profile, byId, chosen, ops.defaultBranchOf(runDir), remoteBranches);
     ops.createTaskBranch(runDir, branchName, baseRef);
   } catch (error) {
     return { status: 'prepare_failed', error: error.message, runDir };
@@ -319,7 +326,7 @@ async function runIssueInClone(ctx, chosen, run) {
   const reviewFixSummaries = [];
   let finalOutput = agentResult.output;
 
-  if (isBlockedVerdict(verdict)) return blockOnVerdict(verdict, null);
+  if (isBlockedVerdict(verdict)) return blockOnVerdict(verdict, agentResult.output);
   if (verdict.kind !== 'done') {
     return { status: 'agent_failed', error: 'agent did not return DONE or BLOCKED', runDir, output: agentResult.output.slice(-2000) };
   }
@@ -375,7 +382,7 @@ async function runIssueInClone(ctx, chosen, run) {
       if (!fixResult.ok) return { status: 'agent_failed', error: fixResult.error, runDir };
 
       const fixVerdict = parseVerdict(fixResult.output, verdictName);
-      if (isBlockedVerdict(fixVerdict)) return blockOnVerdict(fixVerdict, finalOutput);
+      if (isBlockedVerdict(fixVerdict)) return blockOnVerdict(fixVerdict, fixResult.output);
       if (fixVerdict.kind !== 'done') {
         return { status: 'agent_failed', error: `${fixPassName} agent did not return DONE or BLOCKED`, runDir, output: fixResult.output.slice(-2000) };
       }

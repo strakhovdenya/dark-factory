@@ -210,13 +210,16 @@ function classify({ consumerRoot, profile, issues }, deps = {}) {
 
 // Which ref a new branch starts from: the consumer's default branch (from the clone) for an
 // independent issue or one whose dependency is merged, otherwise the dependency's own task branch
-// (stacked PR). Always an origin/... ref: a fresh clone has remote-tracking refs only.
-function resolveBaseRef(profile, byId, entry, defaultBranch) {
+// (stacked PR): the remote branch the template recognizes as the dependency's, whatever title it
+// was created under, else its name by the current title. Always an origin/... ref: a fresh clone
+// has remote-tracking refs only.
+function resolveBaseRef(profile, byId, entry, defaultBranch, remoteBranches = []) {
   if (!entry.dependsOn || entry.dependsOn.length === 0) return `origin/${defaultBranch}`;
   const depId = entry.dependsOn[0];
   const dep = byId.get(depId);
   if (!dep || dep.status === 'done') return `origin/${defaultBranch}`;
-  return `origin/${branchNameFor(profile.branchTemplate, depId, dep.title)}`;
+  const [existing] = branchesOfIssue(remoteBranches, profile.branchTemplate, depId);
+  return `origin/${existing || branchNameFor(profile.branchTemplate, depId, dep.title)}`;
 }
 
 // --- controller-owned GitHub mutations (the agent never does these) ---

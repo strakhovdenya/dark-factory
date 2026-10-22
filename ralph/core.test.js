@@ -162,6 +162,16 @@ test('stops with branch_exists when a task branch of the issue is on the remote'
   assert.deepEqual(calls, []);
 });
 
+test('reports a template that cannot name the issue branch as prepare_failed', async (t) => {
+  const calls = [];
+  const ctx = unitContext(t);
+  ctx.profile = { ...ctx.profile, branchTemplate: 'ISSUE-{issue}{slug}' };
+  const result = await runIssue(ctx, new Map(), { ...CHOSEN, title: '2FA support' }, runOps(calls));
+  assert.equal(result.status, 'prepare_failed');
+  assert.match(result.error, /branchTemplate/);
+  assert.deepEqual(calls, []);
+});
+
 test('reports prepare_failed when the remote branch lookup fails', async (t) => {
   const calls = [];
   const ops = runOps(calls, {

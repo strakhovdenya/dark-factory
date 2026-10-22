@@ -272,6 +272,7 @@ module.exports = {
   buildAgentEnv,
   parseStatusZ,
   entryPaths,
+  escapeRegExp,
   findProtectedChanges,
   changedPackageFields,
   isNamedInAffects,

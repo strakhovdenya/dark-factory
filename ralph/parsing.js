@@ -1,11 +1,8 @@
 'use strict';
 
-const { parseStatusZ, entryPaths } = require('./boundary');
+const { parseStatusZ, entryPaths, escapeRegExp } = require('./boundary');
 const { isDocOnlyPath } = require('../profile/path-patterns');
 const { loadCore, namesOf } = require('../verifier/issue-contract');
-
-const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/g;
-const escapeRegExp = (text) => text.replace(REGEX_SPECIAL, '\\$&');
 
 // `porcelain` is `git status --porcelain=v1 -z -uall` output (github.js gitPorcelainStatus()):
 // it covers untracked new files that a plain `git diff` misses. Returns the current path of every
@@ -41,7 +38,9 @@ function lastMatch(text, re) {
   let last = null;
   while ((match = global.exec(text)) !== null) {
     last = match;
-    if (match.index === global.lastIndex) global.lastIndex++; // avoid infinite loop on zero-width match
+    // Continue right after the START of this match, not after its end: a pattern ending in
+    // `([\s\S]*)$` consumes the rest of the text, and a later occurrence must still be found.
+    global.lastIndex = match.index + 1;
   }
   return last;
 }
