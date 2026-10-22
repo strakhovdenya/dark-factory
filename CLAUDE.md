@@ -12,19 +12,20 @@ This repo is developed by its owner in an interactive Claude Code session. Ralph
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/` | Package sources (the `files` field of `package.json`) | **yes** |
+| `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | **yes** |
 | `.claude/` | Tooling for developing the factory only (its own scripts, settings, skills, agents) | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repo | no |
 
 Rules of placement:
-- Something a project must receive → package dirs (`skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`).
+- Something a project must receive → package dirs (`skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/`).
 - Something only used while developing the factory → `.claude/`. Never put package sources there, and never let the factory's own skills/agents reach projects.
 - `.claude/` and `.factory/` are never part of the package.
 
 ## Commands
 
 - `npm test` — the only test command (`node --test`). Tests must pass on **Windows and Linux**, **without network** and **without a real AI** (stub the agent/model). CI job `Test (Linux)` runs it on every PR.
+- Portable tests (`ralph/**/*.test.js`) replace processes at the `child_process` boundary and need no Docker. Tests that need a real Docker engine live in `test/integration/`, are not part of `npm test` and are never replaced by a skip that reports success.
 
 ## Core invariants (do not break)
 

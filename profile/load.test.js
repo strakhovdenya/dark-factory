@@ -20,6 +20,12 @@ const MONOREPO = {
     { name: 'web', path: 'packages/web' },
   ],
   skillRules: [{ path: 'packages/web', extensions: ['.tsx'], label: 'web UI', skills: ['ui'] }],
+  sandbox: {
+    image: 'unit-sandbox:test',
+    nodeVersion: '22',
+    claudeCodeVersion: '1.2.3',
+    allowedHosts: ['registry.example.org'],
+  },
   ralph: { enabled: true, techDebtTrackerIssue: 12, enabledSteps: [] },
 };
 
@@ -319,5 +325,143 @@ test('loads extended settings in both fixture profiles', (t) => {
     const profile = loadProfile(root);
     assert.equal(profile.ralph.humanNeededVerdict, 'BLOCKED-X', fixture);
     assert.deepEqual(profile.hooks, hooks, fixture);
+  }
+});
+
+const withSandbox = (extra) => (profile) => {
+  profile.sandbox = { ...profile.sandbox, ...extra };
+};
+
+test('rejects enabled controller without sandbox', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const childProcess = require('node:child_process');
+  const started = [];
+  for (const name of /** @type {('spawn' | 'spawnSync' | 'exec' | 'execSync' | 'execFile' | 'execFileSync' | 'fork')[]} */ ([
+    'spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork',
+  ])) {
+    t.mock.method(childProcess, name, (...args) => {
+      started.push([name, args[0]]);
+      throw new Error('a process was started');
+    });
+  }
+  for (const fixture of FIXTURE_PROFILES) {
+    const root = profileCopy(t, fixture, (profile) => {
+      profile.ralph = { ...ENABLED_RALPH };
+      delete profile.sandbox;
+    });
+    assert.throws(() => loadProfile(root), /profile\.json[\s\S]*sandbox: required field is missing/, fixture);
+    const empty = profileCopy(t, fixture, (profile) => {
+      profile.ralph = { ...ENABLED_RALPH };
+      profile.sandbox = {};
+    });
+    assert.throws(() => loadProfile(empty), /sandbox\.image: required field is missing/, fixture);
+  }
+  assert.deepEqual(started, []);
+});
+
+test('keeps sandbox and judge schema conditions independent', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const ralphStates = { absent: undefined, disabled: { enabled: false }, enabled: ENABLED_RALPH };
+  const judgeStates = { absent: undefined, disabled: { enabled: false }, enabled: { enabled: true } };
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const [ralphName, ralph] of Object.entries(ralphStates)) {
+      for (const [judgeName, judge] of Object.entries(judgeStates)) {
+        for (const hasSandbox of [false, true]) {
+          for (const hasLabel of [false, true]) {
+            const root = profileCopy(t, fixture, (profile) => {
+              const base = profile.sandbox;
+              delete profile.ralph;
+              delete profile.judge;
+              delete profile.sandbox;
+              delete profile.labels;
+              if (ralph) profile.ralph = { ...ralph };
+              if (judge) profile.judge = { ...judge };
+              if (hasSandbox) profile.sandbox = base;
+              if (hasLabel) profile.labels = { calibration: 'mark-for-analysis' };
+            });
+            const name = `${fixture}: ralph ${ralphName}, judge ${judgeName}, sandbox ${hasSandbox}, label ${hasLabel}`;
+            const needsSandbox = ralphName === 'enabled' && !hasSandbox;
+            const needsLabel = judgeName === 'enabled' && !hasLabel;
+            if (!needsSandbox && !needsLabel) {
+              assert.equal(loadProfile(root).sandbox !== undefined, hasSandbox, name);
+              continue;
+            }
+            let message = '';
+            try {
+              loadProfile(root);
+            } catch (error) {
+              message = error.message;
+            }
+            assert.equal(/sandbox: required field is missing/.test(message), needsSandbox, name);
+            assert.equal(/labels\.calibration/.test(message), needsLabel, name);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('rejects invalid sandbox fields through shared validation', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  const { collectSandboxProblems, validateSandboxConfig } = require('../ralph/sandbox');
+  const cases = [
+    { field: 'sandbox.image', change: { image: 'untagged-image' } },
+    { field: 'sandbox.image', change: { image: 'bad image:tag' } },
+    { field: 'sandbox.nodeVersion', change: { nodeVersion: '22.x' } },
+    { field: 'sandbox.claudeCodeVersion', change: { claudeCodeVersion: '^2.1.0' } },
+    { field: 'sandbox.claudeCodeVersion', change: { claudeCodeVersion: 'latest' } },
+    { field: 'sandbox.allowedHosts', change: { allowedHosts: [] } },
+    { field: 'sandbox.allowedHosts[1]', change: { allowedHosts: ['registry.example.org', 'https://registry.example.org'] } },
+    { field: 'sandbox.allowedHosts[0]', change: { allowedHosts: ['10.0.0.1'] } },
+    { field: 'sandbox.installEnv.HTTPS_PROXY', change: { installEnv: { HTTPS_PROXY: 'x' } } },
+    { field: 'sandbox.installEnv.GIT_DIR', change: { installEnv: { GIT_DIR: 'x' } } },
+    { field: 'sandbox.installEnv.1BAD', change: { installEnv: { '1BAD': 'x' } } },
+    { field: 'sandbox.installEnv.FLAG', change: { installEnv: { FLAG: 1 } } },
+    { field: 'sandbox.extra', change: { extra: true } },
+  ];
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const { field, change } of cases) {
+      const root = profileCopy(t, fixture, withSandbox(change));
+      const name = `${fixture}: ${field}`;
+      assert.throws(
+        () => loadProfile(root),
+        (/** @type {Error} */ error) => error.message.includes('profile.json') && error.message.includes(`  - ${field}: `),
+        name,
+      );
+      const { sandbox } = JSON.parse(fs.readFileSync(path.join(root, '.factory', 'profile.json'), 'utf8'));
+      assert.throws(() => validateSandboxConfig(sandbox), (/** @type {Error} */ error) => error.message.includes(field), name);
+      assert.ok(collectSandboxProblems(sandbox).length > 0, name);
+    }
+  }
+});
+
+test('rejects invalid sandbox even when ralph is not enabled', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const ralph of [undefined, { enabled: false }]) {
+      const root = profileCopy(t, fixture, (profile) => {
+        delete profile.ralph;
+        if (ralph) profile.ralph = ralph;
+        profile.sandbox = { ...profile.sandbox, image: 'untagged-image' };
+      });
+      assert.throws(() => loadProfile(root), /sandbox\.image/, fixture);
+    }
+    const absent = profileCopy(t, fixture, (profile) => {
+      profile.ralph = { enabled: false };
+      delete profile.sandbox;
+    });
+    assert.equal(loadProfile(absent).sandbox, undefined, fixture);
+  }
+});
+
+test('rejects local runs root in project profile', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  for (const fixture of FIXTURE_PROFILES) {
+    const atRoot = profileCopy(t, fixture, (profile) => {
+      profile.runsRoot = '/data/runs';
+    });
+    assert.throws(() => loadProfile(atRoot), /runsRoot: unknown field/, fixture);
+    const inSandbox = profileCopy(t, fixture, withSandbox({ runsRoot: '/data/runs' }));
+    assert.throws(() => loadProfile(inSandbox), /sandbox\.runsRoot: unknown field/, fixture);
   }
 });

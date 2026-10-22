@@ -204,6 +204,37 @@
         }
       }
     },
+    "sandbox": {
+      "description": "Docker sandbox of the Ralph runtime: the image and the pinned tool versions, the egress allowlist and the install environment. Required when ralph.enabled is true; when given it is always validated, whether Ralph is enabled or not. The semantic rules (explicit image tag, exact claudeCodeVersion, host names, reserved variable names) are those of ralph/sandbox.js validateSandboxConfig, applied by loadProfile. Holds no credentials. The runs root is not a profile setting: it belongs to the consumer's local run config outside Git.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "nodeVersion", "claudeCodeVersion", "allowedHosts"],
+      "properties": {
+        "image": {
+          "description": "Docker image reference with an explicit tag (name:tag) that the runtime builds and runs.",
+          "type": "string"
+        },
+        "nodeVersion": {
+          "description": "Node.js version of the image, numeric: 22, 22.1 or 22.1.2.",
+          "type": "string"
+        },
+        "claudeCodeVersion": {
+          "description": "Exact version X.Y.Z of the claude CLI installed in the image; no range, tag or pre-release.",
+          "type": "string"
+        },
+        "allowedHosts": {
+          "description": "Host names the egress proxy lets the sandbox reach (CONNECT to port 443, exact name only): DNS names of at least two labels, no scheme, IP, port, path or wildcard.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "installEnv": {
+          "description": "Optional environment for dependency installs inside the sandbox: string values, names matching ^[A-Za-z_][A-Za-z0-9_]*$. Proxy, DOCKER_*, GIT_*, GCM_*, GH_*, HOME and CLAUDE_CONFIG_DIR are reserved. Absent means {} (normalized by the runtime only).",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
     "ralph": {
       "description": "Ralph, the autonomous issue-executing agent. Off unless \"enabled\" is true; a disabled Ralph needs no other fields.",
       "type": "object",
@@ -241,6 +272,13 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": { "ralph": { "type": "object", "properties": { "enabled": { "const": true } }, "required": ["enabled"] } },
+        "required": ["ralph"]
+      },
+      "then": { "required": ["sandbox"] }
+    },
     {
       "if": {
         "properties": { "judge": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] } },

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { loadProfile } = require('../../profile/load');
+const { validateSandboxConfig } = require('../../ralph/sandbox');
 const { CORE_CHECK_NAMES } = require('../../verifier/checks');
 
 const FIXTURES = path.join(__dirname, '..', '..', 'test', 'fixtures', 'profiles');
@@ -145,4 +146,26 @@ test('example hook commands preserve source behaviour', () => {
       { paths: ['**/*.{ts,tsx}'], command: { argv: node('typescript/bin/tsc', '--noEmit'), cwd: '.' } },
     ],
   });
+});
+
+test('example profiles keep sandbox settings', () => {
+  assert.deepEqual(loadProfile(jobflowRoot).sandbox, {
+    image: 'ralph-sandbox:local',
+    nodeVersion: '22',
+    claudeCodeVersion: '2.1.283',
+    allowedHosts: ['registry.npmjs.org', 'binaries.prisma.sh', 'api.anthropic.com'],
+    installEnv: { PUPPETEER_SKIP_DOWNLOAD: 'true' },
+  });
+  assert.deepEqual(loadProfile(cardsRoot).sandbox, {
+    image: 'cards-ralph-sandbox:local',
+    nodeVersion: '22',
+    claudeCodeVersion: '2.1.283',
+    allowedHosts: ['registry.npmjs.org', 'api.anthropic.com'],
+  });
+  for (const root of [jobflowRoot, cardsRoot]) {
+    const profile = loadProfile(root);
+    assert.equal(profile.runsRoot, undefined);
+    assert.equal(profile.sandbox.runsRoot, undefined);
+    assert.doesNotThrow(() => validateSandboxConfig(profile.sandbox));
+  }
 });

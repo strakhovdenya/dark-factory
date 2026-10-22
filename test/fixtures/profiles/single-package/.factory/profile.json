@@ -18,5 +18,12 @@
     "goldenDir": "../../verifier/golden/single-package",
     "checks": ["test-tampering-scan", "ci-checks", "allowed-model"]
   },
+  "sandbox": {
+    "image": "factory-sandbox-test:single",
+    "nodeVersion": "22.1",
+    "claudeCodeVersion": "1.2.4",
+    "allowedHosts": ["packages.example.org", "models.example.org"],
+    "installEnv": { "SKIP_BINARY_DOWNLOAD": "true" }
+  },
   "ralph": { "enabled": false }
 }

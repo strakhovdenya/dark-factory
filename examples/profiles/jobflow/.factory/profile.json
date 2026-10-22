@@ -85,5 +85,12 @@
     "No real Postgres database.",
     "No running apps/api or apps/web server; starting a dev server in the background is forbidden."
   ],
+  "sandbox": {
+    "image": "ralph-sandbox:local",
+    "nodeVersion": "22",
+    "claudeCodeVersion": "2.1.283",
+    "allowedHosts": ["registry.npmjs.org", "binaries.prisma.sh", "api.anthropic.com"],
+    "installEnv": { "PUPPETEER_SKIP_DOWNLOAD": "true" }
+  },
   "ralph": { "enabled": true, "techDebtTrackerIssue": 334, "enabledSteps": [], "humanNeededVerdict": "BLOCKED-PROMPT-CHANGE" }
 }
