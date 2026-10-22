@@ -167,7 +167,7 @@
       "properties": {
         "prd": { "description": "Directory with PRD documents.", "type": "string", "minLength": 1 },
         "plans": { "description": "Directory with plans.", "type": "string", "minLength": 1 },
-        "adr": { "description": "Directory with architecture decision records.", "type": "string", "minLength": 1 }
+        "adr": { "description": "Path of the one file with architecture decision records, relative to the project root (a file, not a directory). The ADR rule of the shared path-to-skills table applies to exactly this file, matched exactly after path separators are normalized. Without it no ADR rule is added and the adr skill reports that no ADR file is configured.", "type": "string", "minLength": 1 }
       }
     },
     "hooks": {

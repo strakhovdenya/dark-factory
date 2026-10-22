@@ -54,22 +54,10 @@
       "extensions": [".ts", ".tsx", ".js", ".jsx", ".css"],
       "label": "frontend (apps/web)",
       "skills": ["vercel-react-best-practices", "ui-ux-pro-max"]
-    },
-    {
-      "path": "scripts",
-      "extensions": [".js", ".mjs", ".cjs"],
-      "label": "scripts",
-      "skills": ["js-conventions"]
-    },
-    {
-      "path": ".claude/ralph",
-      "extensions": [".js", ".mjs", ".cjs"],
-      "label": "Ralph (.claude/ralph)",
-      "skills": ["js-conventions"]
     }
   ],
   "ruleFiles": ["CLAUDE.md", "apps/api/CLAUDE.md", "apps/web/CLAUDE.md"],
-  "docs": { "prd": "project-management/prd", "plans": "project-management/plan" },
+  "docs": { "prd": "project-management/prd", "plans": "project-management/plan", "adr": "project-management/DECISIONS.md" },
   "hooks": {
     "lint": [
       { "paths": ["apps/api/**/*.{ts,tsx}"], "command": { "argv": ["node", "node_modules/eslint/bin/eslint.js", "--fix", "{file}"], "cwd": "apps/api" } },

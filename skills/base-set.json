@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "processSkills": [
+    {
+      "name": "prd",
+      "source": {
+        "kind": "package-dir",
+        "path": "skills/prd"
+      }
+    },
+    {
+      "name": "plan",
+      "source": {
+        "kind": "package-dir",
+        "path": "skills/plan"
+      }
+    },
+    {
+      "name": "issues",
+      "source": {
+        "kind": "package-dir",
+        "path": "skills/issues"
+      }
+    },
+    {
+      "name": "task-lifecycle",
+      "source": {
+        "kind": "package-dir",
+        "path": "skills/task-lifecycle"
+      }
+    },
+    {
+      "name": "epic-discovery",
+      "source": {
+        "kind": "package-dir",
+        "path": "skills/epic-discovery"
+      }
+    },
+    {
+      "name": "adr",
+      "source": {
+        "kind": "package-dir",
+        "path": "skills/adr"
+      }
+    }
+  ],
+  "jsMetaskills": [
+    {
+      "name": "js-conventions",
+      "source": {
+        "kind": "npm",
+        "package": "metaskills",
+        "version": "1.0.5",
+        "path": "skills/js-conventions"
+      }
+    },
+    {
+      "name": "js-gof",
+      "source": {
+        "kind": "npm",
+        "package": "metaskills",
+        "version": "1.0.5",
+        "path": "skills/js-gof"
+      }
+    },
+    {
+      "name": "js-data-structures",
+      "source": {
+        "kind": "npm",
+        "package": "metaskills",
+        "version": "1.0.5",
+        "path": "skills/js-data-structures"
+      }
+    },
+    {
+      "name": "error-handling",
+      "source": {
+        "kind": "npm",
+        "package": "metaskills",
+        "version": "1.0.5",
+        "path": "skills/error-handling"
+      }
+    },
+    {
+      "name": "modern-javascript",
+      "source": {
+        "kind": "package-dir",
+        "path": "skills/modern-javascript"
+      }
+    },
+    {
+      "name": "data-structures",
+      "source": {
+        "kind": "npm",
+        "package": "metaskills",
+        "version": "1.0.5",
+        "path": "skills/data-structures"
+      }
+    }
+  ],
+  "requiredJsSkills": [
+    "js-conventions",
+    "js-gof",
+    "js-data-structures",
+    "error-handling",
+    "modern-javascript"
+  ],
+  "runtimeSkills": [
+    {
+      "name": "code-review",
+      "usedBy": "the code-review pass of the Ralph pipeline",
+      "source": {
+        "kind": "claude-code-bundled",
+        "version": {
+          "profileField": "sandbox.claudeCodeVersion"
+        },
+        "note": "A skill bundled with the pinned Claude CLI, not a plugin and not a directory of this package. The CLI version is the exact sandbox.claudeCodeVersion of the profile."
+      }
+    }
+  ],
+  "agents": [
+    {
+      "name": "research",
+      "path": "agents/research.md"
+    },
+    {
+      "name": "codebase-scan",
+      "path": "agents/codebase-scan.md"
+    },
+    {
+      "name": "verify",
+      "path": "agents/verify.md"
+    },
+    {
+      "name": "pr-writer",
+      "path": "agents/pr-writer.md"
+    }
+  ]
+}
