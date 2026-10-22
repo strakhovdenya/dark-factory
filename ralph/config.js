@@ -13,8 +13,8 @@ const path = require('node:path');
 const BLOCK_LABEL = 'ralph-blocked';
 
 // Protected in every project on top of the profile's protectedPaths: the agent's own permission
-// files and the repository metadata. A profile can add entries, never remove these.
-const CORE_PROTECTED_PATHS = Object.freeze(['.git/', '.claude/']);
+// files, the repository metadata and the project profile (the trusted settings of the run). A profile can add entries, never remove these.
+const CORE_PROTECTED_PATHS = Object.freeze(['.git/', '.claude/', '.factory/profile.json']);
 
 // Fallback when the local config has no `reviewMaxTurns`: the reviewer only reads a diff and runs
 // read-only checks, so it needs far fewer turns than the implementer.

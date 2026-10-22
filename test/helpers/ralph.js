@@ -15,6 +15,7 @@ const { loadProfile } = require('../../profile/load');
 const { profileCopy } = require('./profiles');
 const sandbox = require('../../ralph/sandbox');
 const { BASE_SKILLS } = require('../../profile/skill-rules');
+const { freezeSnapshot } = require('../../ralph/trusted-profile');
 
 const HUMAN_VERDICT = 'NEEDS.HUMAN+';
 const HUMAN_LABEL = 'needs-human';
@@ -22,7 +23,7 @@ const HUMAN_LABEL = 'needs-human';
 /** A temporary directory removed when the test ends (real path, so links do not confuse paths). */
 /** @type {(...args: any[]) => any} */
 const tempDir = (t, prefix = 'ralph-') => {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 };
@@ -66,17 +67,21 @@ const writeFiles = (root, files) => {
 
 const IGNORED = '.claude/settings.local.json\n.claude/skills/\nnode_modules/\n';
 
+/** The text of a profile committed into a fixture repository: an object is serialized, a string is kept as is. */
+const profileText = (profile) => (typeof profile === 'string' ? profile : JSON.stringify(profile));
+
 /**
- * A bare origin with one commit on `defaultBranch` and a consumer root cloned from it.
+ * A bare origin with one commit on `defaultBranch` and a consumer root cloned from it. `profile`
+ * (an object, or raw text) is committed as the project profile; without it the repository has none.
  * @returns {{ origin: string, consumerRoot: string, scratch: string }}
  */
 /** @type {(...args: any[]) => any} */
-const makeConsumer = (t, { files = {}, defaultBranch = 'trunk' } = {}) => {
+const makeConsumer = (t, { files = {}, defaultBranch = 'trunk', profile } = {}) => {
   const scratch = tempDir(t, 'ralph-consumer-');
   const seed = path.join(scratch, 'seed');
   fs.mkdirSync(seed);
   gitIn(seed, 'init', '-q', '-b', defaultBranch);
-  writeFiles(seed, { '.gitignore': IGNORED, 'README.md': 'neutral\n', ...files });
+  writeFiles(seed, { '.gitignore': IGNORED, 'README.md': 'neutral\n', ...(profile === undefined ? {} : { '.factory/profile.json': profileText(profile) }), ...files });
   gitIn(seed, 'add', '-A');
   gitIn(seed, 'commit', '-qm', 'init');
   const origin = path.join(scratch, 'origin.git');
@@ -84,6 +89,17 @@ const makeConsumer = (t, { files = {}, defaultBranch = 'trunk' } = {}) => {
   const consumerRoot = path.join(scratch, 'consumer');
   gitIn(scratch, 'clone', '-q', origin, consumerRoot);
   return { origin, consumerRoot, scratch };
+};
+
+/** Pushes a branch of `origin` (from its default branch) whose files are `files`; for stacked-base scenarios. */
+const pushBranch = (t, origin, branch, files) => {
+  const work = path.join(tempDir(t, 'ralph-branch-'), 'work');
+  gitIn(path.dirname(work), 'clone', '-q', origin, work);
+  gitIn(work, 'checkout', '-q', '-b', branch);
+  writeFiles(work, files);
+  gitIn(work, 'add', '-A');
+  gitIn(work, 'commit', '-qm', `work on ${branch}`);
+  gitIn(work, 'push', '-q', 'origin', branch);
 };
 
 /** Makes Ralph's controller settings complete on a fixture profile copy. */
@@ -275,16 +291,18 @@ const defaultAgent = (fixture, { implement } = {}) => ({ pass, runDir }) => {
  * result with the recorded agent calls, sandbox runs and GitHub mutations.
  */
 /** @type {(...args: any[]) => any} */
-const scenario = async (t, fixture, { mutate, files = {}, issue = issueWith(7, [APP_FILE[fixture]]), onAgent, onRun = defaultRun, labels, proxy = true, settings, stepRegistry } = {}) => {
+const scenario = async (t, fixture, { mutate, files = {}, baseProfile, entries = [], prepareOrigin, issue = issueWith(7, [APP_FILE[fixture]]), onAgent, onRun = defaultRun, labels, proxy = true, settings, stepRegistry } = {}) => {
   const { runIssue } = require('../../ralph/core');
   isolateGit(t);
   const profile = controllerProfile(t, fixture, mutate);
-  const { origin, consumerRoot } = makeConsumer(t, { files });
+  // The selected base carries the host's profile unless a scenario says otherwise (null: none).
+  const { origin, consumerRoot } = makeConsumer(t, { files, profile: baseProfile === undefined ? profile : (baseProfile ?? undefined) });
+  if (prepareOrigin) prepareOrigin(origin);
   const gh = fakeGitHub({ body: issue.body, labels });
   const calls = mockGh(t, gh.onGh);
   const box = mockSandbox(t, { onAgent: onAgent || defaultAgent(fixture), onRun, proxy });
-  const ctx = runContext(t, { consumerRoot, origin, profile, settings, stepRegistry });
-  const result = await runIssue(ctx, new Map([[issue.id, { ...issue, status: 'not-started' }]]), issue);
+  const ctx = runContext(t, { consumerRoot, origin, profile: freezeSnapshot(profile), settings, stepRegistry });
+  const result = await runIssue(ctx, new Map([...entries.map((entry) => [entry.id, entry]), [issue.id, { ...issue, status: 'not-started' }]]), issue);
   const labelsSet = gh.mutations.filter((m) => m.kind === 'label').map((m) => m.label);
   const comments = gh.mutations.filter((m) => m.kind === 'comment');
   const prs = gh.mutations.filter((m) => m.kind === 'pr');
@@ -304,6 +322,7 @@ module.exports = {
   gitIn,
   writeFiles,
   makeConsumer,
+  pushBranch,
   enableController,
   controllerProfile,
   mockGh,

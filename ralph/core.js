@@ -54,6 +54,7 @@ const { runAgent } = require('./agent');
 const sandbox = require('./sandbox');
 const { buildAgentEnv, parseStatusZ, findProtectedChanges, findUndeclaredToolingChanges, gitMetaFingerprint, createTaskBudget } = require('./boundary');
 const { branchNameFor } = require('../profile/branch');
+const { assertBaseProfileMatches } = require('./trusted-profile');
 const { DEFAULT_REGISTRY, STEP_OUTCOMES, resolvePipeline } = require('./steps/registry');
 
 const PASSED = ['passed', 'passed-out-of-scope'];
@@ -138,6 +139,7 @@ const MIN_SANDBOX_STEP_MS = 60000;
 const RUN_OPS = {
   listRemoteBranches,
   prepareClone: workspace.prepareClone,
+  assertBaseProfile: assertBaseProfileMatches,
   defaultBranchOf,
   createTaskBranch: workspace.createTaskBranch,
   startProxy: (spec, options) => sandbox.startProxy(spec, options),
@@ -198,6 +200,8 @@ async function runIssue(ctx, byId, chosen, ops = RUN_OPS) {
     ops.prepareClone(sandboxEnv.runsRoot, runDir, ctx.originUrl);
     baseRef = resolveBaseRef(profile, byId, chosen, ops.defaultBranchOf(runDir), remoteBranches);
     ops.createTaskBranch(runDir, branchName, baseRef);
+    // The checked-out base must carry the trusted profile, before the proxy, installs and the agent.
+    ops.assertBaseProfile({ snapshot: profile, consumerRoot, runDir, baseRef });
   } catch (error) {
     return { status: 'prepare_failed', error: error.message, runDir };
   }

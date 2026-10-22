@@ -5,7 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { summarizeStatuses, runRalph, parseArgs } = require('./run');
+const { summarizeStatuses, runRalph, parseArgs, main } = require('./run');
+const { DEFAULT_REGISTRY, createRegistry } = require('./steps/registry');
 const sandbox = require('./sandbox');
 const { BLOCK_LABEL, lockPathFor, statePathFor } = require('./config');
 const { FIXTURE_PROFILES } = require('../test/helpers/profiles');
@@ -15,6 +16,7 @@ const {
   gitIn,
   writeFiles,
   makeConsumer,
+  pushBranch,
   controllerProfile,
   mockGh,
   fakeGitHub,
@@ -90,15 +92,16 @@ const READY = (id = 7) => [{ id, dependsOn: [], status: 'not-started', ready: tr
 
 /** A consumer with a gh stand-in, a controlled HOME and runs root outside it. */
 /** @type {(...args: any[]) => any} */
-const setup = (t, fixture, { mutate, labels, localConfig = {} } = {}) => {
+const setup = (t, fixture, { mutate, labels, localConfig = {}, rootProfile } = {}) => {
   useHome(t);
   isolateGit(t);
-  const { origin, consumerRoot } = makeConsumer(t);
+  const profile = controllerProfile(t, fixture, mutate);
+  // The profile is committed to the consumer's base, so the clone of a run carries it too.
+  const { origin, consumerRoot } = makeConsumer(t, { profile: rootProfile === undefined ? profile : (rootProfile ?? undefined) });
   const gh = fakeGitHub({ labels });
   const calls = mockGh(t, gh.onGh);
   const runsRoot = path.join(tempDir(t, 'ralph-runs-'), 'runs');
-  const profile = controllerProfile(t, fixture, mutate);
-  return { origin, consumerRoot, gh, calls, runsRoot, profile, localConfig: { issues: [{ id: 7 }], runsRoot, ...localConfig } };
+  return { t, origin, consumerRoot, gh, calls, runsRoot, profile, localConfig: { issues: [{ id: 7 }], runsRoot, ...localConfig } };
 };
 
 /** @type {(...args: any[]) => any} */
@@ -362,10 +365,269 @@ test('writes state and lock in the runs root', async (t) => {
   assert.equal(JSON.parse(fs.readFileSync(statePathFor(env.runsRoot), 'utf8')).iterations, 1);
 });
 
-test('the CLI needs an explicit consumer root', () => {
-  assert.equal(parseArgs([]), null);
-  assert.equal(parseArgs(['--config', 'x.json']), null);
+test('the CLI takes an optional consumer root', () => {
+  assert.deepEqual(parseArgs([]), { consumerRoot: null, config: null, maxIterations: null });
+  assert.equal(parseArgs(['--config']), null);
+  assert.equal(parseArgs(['--unknown', 'x']), null);
   assert.equal(parseArgs(['--consumer-root', '/x', '--max-iterations', '0']), null);
   assert.deepEqual(parseArgs(['--consumer-root', '/x', '--max-iterations', '2']), { consumerRoot: '/x', config: null, maxIterations: 2 });
   assert.ok(os.tmpdir());
 });
+
+// --- the real CLI path: root discovery, trusted profile, base check ---
+
+const CLI_DEPS = { echo: { out: () => {}, err: () => {} }, saveState: () => {} };
+
+/** Runs `main` with the sandbox replaced; `cwd` is where the root search starts. */
+/** @type {(...args: any[]) => any} */
+const cli = async (env, { cwd = env.consumerRoot, rootArgs = [], classifyIssues = () => READY(), runOneIssue, localConfig = env.localConfig, stepRegistry, iterations = 1 } = {}) => {
+  const configPath = path.join(tempDir(env.t, 'ralph-cfg-'), 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify(localConfig));
+  const fake = fakeSandboxApi({ installExitHandlers: () => {} });
+  const picked = [];
+  let error = null;
+  try {
+    await main([...rootArgs, '--config', configPath, '--max-iterations', String(iterations)], {
+      cwd,
+      deps: {
+        ...CLI_DEPS,
+        sandboxApi: fake.api,
+        stepRegistry,
+        classifyIssues,
+        runOneIssue:
+          runOneIssue ||
+          (async (ctx) => {
+            picked.push(ctx);
+            return { status: 'done', pr: 'https://example.invalid/pr/1' };
+          }),
+      },
+    });
+  } catch (caught) {
+    error = caught;
+  }
+  return { error, picked, sandboxCalls: fake.calls };
+};
+
+const assertStoppedBeforeLock = (env, run) => {
+  assert.ok(run.error, 'the CLI failed');
+  assert.deepEqual(run.picked, [], 'no issue was run');
+  assert.deepEqual(run.sandboxCalls.filter((call) => typeof call === 'string'), [], 'no Docker step');
+  assert.equal(fs.existsSync(env.runsRoot), false, 'no lock and no runs directory');
+  assert.deepEqual(env.calls.filter((call) => call.file === 'gh'), [], 'no gh call');
+};
+
+for (const fixture of FIXTURE_PROFILES) {
+  test(`loads profile from repository root (${fixture})`, async (t) => {
+    const env = setup(t, fixture);
+    const run = await cli(env);
+    assert.equal(run.error, null, run.error && run.error.message);
+    assert.equal(run.picked[0].consumerRoot, env.consumerRoot);
+    assert.deepEqual(run.picked[0].profile, env.profile);
+  });
+
+  test(`resolves profile from git root when started in subdirectory (${fixture})`, async (t) => {
+    const env = setup(t, fixture);
+    const sub = path.join(env.consumerRoot, 'deep', 'sub');
+    fs.mkdirSync(sub, { recursive: true });
+    const run = await cli(env, { cwd: sub });
+    assert.equal(run.error, null, run.error && run.error.message);
+    assert.equal(run.picked[0].consumerRoot, env.consumerRoot);
+    assert.deepEqual(run.picked[0].profile, env.profile);
+  });
+
+  test(`fails without profile before cloning (${fixture})`, async (t) => {
+    const env = setup(t, fixture, { rootProfile: null });
+    const run = await cli(env);
+    assertStoppedBeforeLock(env, run);
+    assert.match(run.error.message, /Profile not found/);
+    assert.ok(run.error.message.includes(path.join(env.consumerRoot, '.factory', 'profile.json')), run.error.message);
+  });
+
+  test(`fails on invalid profile naming field (${fixture})`, async (t) => {
+    const env = setup(t, fixture, { rootProfile: JSON.stringify({ ...controllerProfile(t, fixture), branchTemplate: 7 }) });
+    const run = await cli(env);
+    assertStoppedBeforeLock(env, run);
+    assert.match(run.error.message, /branchTemplate/);
+  });
+
+  test(`does not start disabled controller (${fixture})`, async (t) => {
+    const env = setup(t, fixture, {
+      mutate: (profile) => {
+        profile.ralph.enabled = false;
+      },
+    });
+    const run = await cli(env);
+    assertStoppedBeforeLock(env, run);
+    assert.match(run.error.message, /not enabled/);
+  });
+
+  test(`keeps trusted startup profile (${fixture})`, async (t) => {
+    const env = setup(t, fixture, { localConfig: { issues: [{ id: 7 }, { id: 8 }], maxIterations: 2 } });
+    const initial = structuredClone(env.profile);
+    const seen = [];
+    const run = await cli(env, {
+      iterations: 2,
+      classifyIssues: () => [readyEntry(7), readyEntry(8)],
+      runOneIssue: async (ctx, _byId, chosen) => {
+        seen.push(ctx.profile);
+        if (chosen.id === 7) fs.writeFileSync(path.join(env.consumerRoot, '.factory', 'profile.json'), '{ "changed": true }');
+        return { status: 'done', pr: 'x' };
+      },
+    });
+    assert.equal(run.error, null, run.error && run.error.message);
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0], seen[1], 'one snapshot for the whole run');
+    assert.deepEqual(seen[1], initial);
+    assert.ok(Object.isFrozen(seen[1]) && Object.isFrozen(seen[1].apps) && Object.isFrozen(seen[1].apps[0]));
+  });
+
+  test(`preserves pipeline validation after profile discovery (${fixture})`, async (t) => {
+    const polish = { name: 'polish', kind: 'check', skipOnDocOnly: false, run: () => ({ kind: 'passed' }) };
+    const mutate = (profile) => {
+      profile.ralph.enabledSteps = ['implement', 'polish', 'final-gate'];
+    };
+    const unknown = setup(t, fixture, { mutate });
+    assertStoppedBeforeLock(unknown, await cli(unknown));
+    t.mock.restoreAll();
+
+    // The prepared registry passed in deps is the one in force, not only the default.
+    const env = setup(t, fixture, { mutate });
+    const run = await cli(env, { stepRegistry: createRegistry([...DEFAULT_REGISTRY.values(), polish]) });
+    assert.equal(run.error, null, run.error && run.error.message);
+    assert.deepEqual(run.picked[0].profile.ralph.enabledSteps, ['implement', 'polish', 'final-gate']);
+  });
+
+  test(`rejects invalid pipeline after discovery before side effects (${fixture})`, async (t) => {
+    const cases = [
+      {
+        mutate: (profile) => {
+          profile.ralph.enabledSteps = ['implement', 'ghost', 'final-gate'];
+        },
+        message: /ghost/,
+      },
+      {
+        mutate: (profile) => {
+          profile.ralph.stepBudgets = { 'final-gate': 1 };
+        },
+        message: /ralph\.stepBudgets\.final-gate/,
+      },
+    ];
+    for (const { mutate, message } of cases) {
+      const env = setup(t, fixture, { mutate, localConfig: { issues: [] } });
+      const run = await cli(env, { classifyIssues: () => [] });
+      assertStoppedBeforeLock(env, run);
+      assert.match(run.error.message, message);
+      t.mock.restoreAll();
+    }
+  });
+
+  test(`uses explicit consumer root instead of cwd (${fixture})`, async (t) => {
+    const env = setup(t, fixture);
+    const foreign = makeConsumer(t, { profile: { not: 'the profile of this run' } });
+    for (const cwd of [foreign.consumerRoot, tempDir(t)]) {
+      const first = env.calls.length;
+      const run = await cli(env, { cwd, rootArgs: ['--consumer-root', env.consumerRoot] });
+      assert.equal(run.error, null, run.error && run.error.message);
+      assert.equal(run.picked[0].consumerRoot, env.consumerRoot);
+      assert.deepEqual(run.picked[0].profile, env.profile);
+      const made = env.calls.slice(first);
+      assert.ok(made.length > 0 && made.every((call) => call.cwd === env.consumerRoot), 'git and gh run in the chosen consumer');
+    }
+  });
+
+  test(`rejects invalid explicit root without cwd fallback (${fixture})`, async (t) => {
+    const env = setup(t, fixture);
+    const sub = path.join(env.consumerRoot, 'packages');
+    fs.mkdirSync(sub, { recursive: true });
+    for (const [explicit, reason] of [
+      [sub, /not the top of its git repository/],
+      [tempDir(t), /not a git repository/],
+    ]) {
+      const run = await cli(env, { rootArgs: ['--consumer-root', explicit] });
+      assertStoppedBeforeLock(env, run);
+      assert.match(run.error.message, reason);
+      assert.ok(run.error.message.includes(explicit));
+    }
+  });
+}
+
+test('fails outside git repository', async (t) => {
+  const env = setup(t, 'single-package');
+  const run = await cli(env, { cwd: tempDir(t) });
+  assertStoppedBeforeLock(env, run);
+  assert.match(run.error.message, /not inside a git repository/);
+});
+
+// --- trusted snapshot of runRalph ---
+
+const isDeepFrozen = (value) => value === null || typeof value !== 'object' || (Object.isFrozen(value) && Object.values(value).every(isDeepFrozen));
+
+for (const fixture of FIXTURE_PROFILES) {
+  test(`copies and deeply freezes profile for programmatic runs (${fixture})`, async (t) => {
+    const env = setup(t, fixture);
+    const run = await drive(env);
+    assert.equal(run.error, null, run.error && run.error.message);
+    const snapshot = run.picked[0].ctx.profile;
+    assert.notEqual(snapshot, env.profile);
+    assert.deepEqual(snapshot, env.profile);
+    assert.ok(isDeepFrozen(snapshot));
+    assert.equal(Object.isFrozen(env.profile), false);
+    assert.equal(Object.isFrozen(env.profile.apps), false);
+  });
+
+  test(`does not mutate trusted snapshot through nested references (${fixture})`, async (t) => {
+    const env = setup(t, fixture);
+    const initial = structuredClone(env.profile);
+    const run = await drive(env, {
+      runOneIssue: async (ctx) => {
+        env.profile.apps[0].name = 'renamed';
+        env.profile.protectedPaths.push('extra/');
+        env.profile.ralph.enabledSteps = ['implement'];
+        assert.deepEqual(ctx.profile, initial, 'the caller changes do not reach the snapshot');
+        assert.throws(() => {
+          ctx.profile.apps[0].name = 'x';
+        }, TypeError);
+        assert.throws(() => ctx.profile.protectedPaths.push('y'), TypeError);
+        assert.throws(() => {
+          ctx.profile.ralph.enabled = false;
+        }, TypeError);
+        assert.deepEqual(ctx.profile, initial);
+        return { status: 'done', pr: 'x' };
+      },
+    });
+    assert.equal(run.error, null, run.error && run.error.message);
+    assert.equal(run.results[7].status, 'done', JSON.stringify(run.results[7]));
+  });
+
+  test(`rejects clone profile mismatch (${fixture})`, async (t) => {
+    const host = controllerProfile(t, fixture);
+    const variants = {
+      value: { ...host, protectedPaths: [...host.protectedPaths, 'extra/'] },
+      'array order': { ...host, protectedPaths: [...host.protectedPaths].reverse() },
+    };
+    const issue = issueWith(7, ['src/a.ts']);
+    for (const stacked of [false, true]) {
+      for (const [kind, other] of Object.entries(variants)) {
+        const label = `${kind} stacked=${stacked}`;
+        const env = setup(t, fixture, { rootProfile: stacked ? undefined : other });
+        const box = mockSandbox(t);
+        if (stacked) pushBranch(t, env.origin, 'task/ISSUE-2-dep', { '.factory/profile.json': JSON.stringify(other) });
+        const statuses = [
+          { ...issue, status: 'not-started', ready: true, dependsOn: stacked ? [2] : [] },
+          ...(stacked ? [{ id: 2, title: 'Dep', dependsOn: [], status: 'in-flight' }] : []),
+        ];
+        const run = await drive(env, { classifyIssues: () => statuses, runOneIssue: require('./core').runIssue, processEnv: { ...process.env, ANTHROPIC_API_KEY: 'sk-test-placeholder' } });
+        assert.equal(run.error, null, run.error && run.error.message);
+        const result = run.results[7];
+        assert.equal(result.status, 'prepare_failed', label);
+        assert.match(result.error, /differs from the host profile/, label);
+        assert.ok(result.error.includes(env.consumerRoot) && result.error.includes(result.runDir), label);
+        assert.ok(result.error.includes(stacked ? 'origin/task/ISSUE-2-dep' : 'origin/trunk'), label);
+        assert.deepEqual(box.proxies, [], label);
+        assert.equal(box.runs.length + box.agents.length, 0, label);
+        assert.deepEqual(env.gh.mutations, [], label);
+        t.mock.restoreAll();
+      }
+    }
+  });
+}

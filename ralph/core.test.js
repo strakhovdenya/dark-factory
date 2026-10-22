@@ -16,6 +16,7 @@ const {
   HUMAN_LABEL,
   gitIn,
   writeFiles,
+  pushBranch,
   controllerProfile,
   okResult,
   SELF_REPORT_FULL,
@@ -119,6 +120,7 @@ const runOps = (calls, overrides = {}) => ({
     return ['trunk', 'task/ISSUE-2-other'];
   },
   prepareClone: () => calls.push('prepareClone'),
+  assertBaseProfile: () => calls.push('assertBaseProfile'),
   defaultBranchOf: () => {
     calls.push('defaultBranchOf');
     return 'trunk';
@@ -342,5 +344,105 @@ for (const fixture of FIXTURE_PROFILES) {
     assert.equal(run.box.runs.length, 0, 'no install and no gate');
     assert.equal(run.prs.length, 0);
     assert.ok(!run.calls.some((call) => call.file !== 'git' && call.file !== 'gh'), 'nothing ran on the host');
+  });
+}
+
+// --- trusted profile: the selected base is checked against the host snapshot ---
+
+const reverseKeys = (value) => {
+  if (Array.isArray(value)) return value.map(reverseKeys);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).reverse().map(([key, inner]) => [key, reverseKeys(inner)]));
+};
+
+const PROFILE_FILE = '.factory/profile.json';
+const nothingExecuted = (run) => {
+  assert.deepEqual(run.box.proxies, [], 'no proxy');
+  assert.equal(run.box.runs.length, 0, 'no install and no gate');
+  assert.equal(run.box.agents.length, 0, 'no agent');
+  assert.equal(run.prs.length, 0, 'no PR');
+  assert.deepEqual(run.gh.mutations, [], 'no GitHub change');
+  assert.deepEqual(originBranches(run.origin), ['trunk'], 'nothing pushed');
+};
+
+test('checks the base profile after checkout and before the proxy', async (t) => {
+  const calls = [];
+  await runIssue(unitContext(t), new Map(), CHOSEN, runOps(calls));
+  assert.ok(calls.indexOf('assertBaseProfile') > calls.indexOf('createTaskBranch task/ISSUE-1-example origin/trunk'));
+  assert.ok(calls.indexOf('assertBaseProfile') < calls.indexOf('startProxy'));
+});
+
+for (const fixture of FIXTURE_PROFILES) {
+  test(`accepts semantically equal base profile (${fixture})`, async (t) => {
+    const host = controllerProfile(t, fixture);
+    const reordered = JSON.stringify(reverseKeys(host), null, 4);
+    assert.notEqual(reordered, JSON.stringify(host));
+    const stacked = await scenario(t, fixture, { baseProfile: reordered });
+    assert.equal(stacked.result.status, 'done', JSON.stringify(stacked.result));
+    t.mock.restoreAll();
+
+    // The base chosen from a dependency's task branch is the one that is compared.
+    const issue = { ...issueWith(7, [APP_FILE[fixture]]), dependsOn: [2] };
+    const dependent = await scenario(t, fixture, {
+      issue,
+      entries: [{ id: 2, title: 'Dep', dependsOn: [], status: 'in-flight' }],
+      prepareOrigin: (origin) => pushBranch(t, origin, 'task/ISSUE-2-dep', { [PROFILE_FILE]: reordered }),
+    });
+    assert.equal(dependent.result.status, 'done', JSON.stringify(dependent.result));
+    const pr = dependent.prs[0].args;
+    assert.equal(pr[pr.indexOf('--base') + 1], 'task/ISSUE-2-dep');
+  });
+
+  test(`rejects missing base profile before execution (${fixture})`, async (t) => {
+    const run = await scenario(t, fixture, { baseProfile: null });
+    assert.equal(run.result.status, 'prepare_failed');
+    assert.match(run.result.error, /Profile not found: expected .*profile\.json/);
+    assert.ok(run.result.error.includes(run.consumerRoot), 'names the host');
+    assert.ok(run.result.error.includes(run.result.runDir), 'names the clone');
+    assert.ok(run.result.error.includes('origin/trunk'), 'names the base');
+    nothingExecuted(run);
+  });
+
+  test(`rejects invalid base profile before execution (${fixture})`, async (t) => {
+    const broken = [JSON.stringify({ ...controllerProfile(t, fixture), branchTemplate: 7 }), '{ not json'];
+    for (const baseProfile of broken) {
+      const run = await scenario(t, fixture, { baseProfile });
+      assert.equal(run.result.status, 'prepare_failed');
+      assert.match(run.result.error, /Invalid profile [\s\S]*branchTemplate|is not valid JSON/);
+      assert.ok(run.result.error.includes('origin/trunk'));
+      nothingExecuted(run);
+      t.mock.restoreAll();
+    }
+  });
+
+  test(`blocks profile changes independently of project protections (${fixture})`, async (t) => {
+    const changes = {
+      edit: (runDir) => fs.appendFileSync(path.join(runDir, PROFILE_FILE), '\n'),
+      delete: (runDir) => fs.rmSync(path.join(runDir, PROFILE_FILE)),
+    };
+    for (const [kind, change] of Object.entries(changes)) {
+      let denied = [];
+      const run = await scenario(t, fixture, {
+        mutate: (profile) => {
+          profile.protectedPaths = (profile.protectedPaths || []).filter((pattern) => !pattern.includes('factory'));
+        },
+        issue: issueWith(7, [APP_FILE[fixture], PROFILE_FILE]),
+        onAgent: defaultAgent(fixture, {
+          implement: ({ runDir }) => {
+            denied = JSON.parse(fs.readFileSync(path.join(runDir, '.claude', 'settings.local.json'), 'utf8')).permissions.deny;
+            writeFiles(runDir, { [APP_FILE[fixture]]: 'export {};\n' });
+            change(runDir);
+            return done('feat', 'x');
+          },
+        }),
+      });
+      assert.ok(denied.includes(`Edit(${PROFILE_FILE})`) && denied.includes(`Write(${PROFILE_FILE})`), `${kind}: permissions deny the profile`);
+      assert.equal(run.result.status, 'blocked', kind);
+      assert.match(run.result.reason, /protected paths: .*\.factory\/profile\.json/);
+      assert.deepEqual(run.box.agents.map((agent) => agent.pass), ['implement'], 'no next step');
+      assert.equal(run.prs.length, 0);
+      assert.deepEqual(originBranches(run.origin), ['trunk'], 'no push');
+      t.mock.restoreAll();
+    }
   });
 }
