@@ -23,7 +23,7 @@ const HUMAN_LABEL = 'needs-human';
 /** A temporary directory removed when the test ends (real path, so links do not confuse paths). */
 /** @type {(...args: any[]) => any} */
 const tempDir = (t, prefix = 'ralph-') => {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 };
