@@ -18,6 +18,9 @@ function deepFreeze(value) {
 /** A separate deep copy of a validated profile, frozen recursively; the caller's object is untouched. */
 const freezeSnapshot = (profile) => deepFreeze(structuredClone(profile));
 
+// Both sides as plain JSON values: what a file can say, with no prototypes or undefined members.
+const jsonValue = (value) => JSON.parse(JSON.stringify(value));
+
 /**
  * Loads the profile of the clone's checked-out base and compares it with the trusted snapshot by
  * JSON value: object key order is irrelevant, array order is not. Throws a configuration error
@@ -32,7 +35,7 @@ function assertBaseProfileMatches({ snapshot, consumerRoot, runDir, baseRef }) {
   } catch (error) {
     throw new Error(`Configuration error: the profile of the selected base cannot be used (${where}): ${error.message}`, { cause: error });
   }
-  if (!isDeepStrictEqual(baseProfile, snapshot)) {
+  if (!isDeepStrictEqual(jsonValue(baseProfile), jsonValue(snapshot))) {
     throw new Error(`Configuration error: the profile of the selected base differs from the host profile loaded at start (${where}); the controller does not repair or publish profiles — commit the same profile to the base`);
   }
 }
