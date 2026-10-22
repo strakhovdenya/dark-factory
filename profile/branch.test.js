@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { issueNumberOfBranch, parseArgs } = require('./branch');
+const { issueNumberOfBranch, branchNameFor, slugify, MAX_SLUG_LENGTH, parseArgs } = require('./branch');
 
 const SCRIPT = path.join(__dirname, 'branch.js');
 const FIXTURES = path.join(__dirname, '..', 'test', 'fixtures', 'profiles');
@@ -68,4 +68,37 @@ test('parses only complete arguments', () => {
   assert.equal(parseArgs(['--project', '.', '--branch']), null);
   assert.equal(parseArgs(['--project', '.', '--other', 'x', '--branch', 'b']), null);
   assert.equal(run([]).status, 2);
+});
+
+test('builds branch name from template', () => {
+  const templates = ['task/ISSUE-{issue}-{slug}', 'fix.{issue}+{slug}', '[{issue}]/{slug}', 'b/{issue}'];
+  for (const template of templates) {
+    const name = branchNameFor(template, 42, 'Add Thing (v2)');
+    assert.equal(issueNumberOfBranch(template, name), 42, name);
+  }
+  assert.equal(branchNameFor('fix.{issue}+{slug}', 42, 'Add Thing (v2)'), 'fix.42+add-thing-v2');
+  assert.equal(branchNameFor('task/ISSUE-{issue}-{slug}', 7, 'Hello, World!'), 'task/ISSUE-7-hello-world');
+});
+
+test('normalizes slug for empty or long titles', () => {
+  const template = 'task/ISSUE-{issue}-{slug}';
+  for (const title of ['', '!!!', 'Только кириллица', null]) {
+    const name = branchNameFor(template, 3, title);
+    assert.equal(name, 'task/ISSUE-3-issue', String(title));
+    assert.equal(issueNumberOfBranch(template, name), 3);
+  }
+  const long = `${'a'.repeat(49)} ${'b'.repeat(30)}`;
+  const slug = slugify(long);
+  assert.equal(slug, 'a'.repeat(49));
+  assert.ok(slug.length <= MAX_SLUG_LENGTH);
+  const exact = slugify('x'.repeat(80));
+  assert.equal(exact.length, MAX_SLUG_LENGTH);
+  const name = branchNameFor(template, 9, long);
+  assert.ok(!name.endsWith('-'));
+  assert.equal(issueNumberOfBranch(template, name), 9);
+});
+
+test('rejects a template that cannot recognize its own branch', () => {
+  assert.throws(() => branchNameFor('{issue}{slug}', 12, '3 apples'), /does not recognize/);
+  assert.throws(() => branchNameFor('task/{slug}', 1, 'x'), /no \{issue\} placeholder/);
 });

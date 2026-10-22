@@ -25,6 +25,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/command" }
     },
+    "dependencySync": {
+      "description": "Dependency synchronization after the Ralph agent changed the root manifest. Optional; absent means no command. The core decides when it runs: a git status entry (either side of a rename, deletions included) with the path package.json in the root. The root manifest is served by this root area and by an app with path \".\". Commands run after the last agent pass and before the final gate, once per affected area (root first, then apps in profile order, commands in array order), in the sandbox with the install specification: read-only .git, the run network with the proxy, the validated sandbox.installEnv; never on the host. Ordinary install, apps[].install and setup are not repeated. A changed manifest whose serving areas have no command, a package.json outside the root and the app paths, or a failing, timed-out or sandbox-failed command makes the issue BLOCKED before the final gate, commit, push and PR. The core does not parse the package manager's argv and never substitutes npm. The commands must not run lifecycle scripts of the project or its dependencies (for npm: npm install --ignore-scripts). {file} is a literal here.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/command" }
+    },
     "apps": {
       "description": "Application layout of the project. A single-package project lists one app with path \".\"; a monorepo lists one app per package.",
       "type": "array",
@@ -50,7 +55,12 @@
             "items": { "$ref": "#/$defs/command" }
           },
           "gate": {
-            "description": "Gate commands run for this app before a commit, in order. Optional; no gate by default.",
+            "description": "Gate commands run for this app before a commit, in order. Optional; no gate by default. The Ralph agent and both reviewers are allowed exactly these commands: for each one the argv joined with single spaces, and the same followed by \" *\" for extra arguments.",
+            "type": "array",
+            "items": { "$ref": "#/$defs/command" }
+          },
+          "dependencySync": {
+            "description": "Dependency synchronization after the Ralph agent changed exactly <path>/package.json of this app (for an app with path \".\": the root package.json). Optional; absent means no command. Same execution and BLOCKED rules as the root dependencySync; the commands must not run lifecycle scripts (for npm: npm install --ignore-scripts).",
             "type": "array",
             "items": { "$ref": "#/$defs/command" }
           }
@@ -58,12 +68,12 @@
       }
     },
     "docOnlyPathPatterns": {
-      "description": "Glob patterns of paths whose changes are documentation only and do not count as code changes.",
+      "description": "Glob patterns (minimatch: *, **, {a,b}; dot true, matchBase false, nonegate true, nocomment true; profile/path-patterns.js) of paths whose changes are documentation only. Paths are relative to the project root, \\ is normalized to /. *.md covers the root only, **/*.md any depth; an entry ending with / stands for all its content (X/ is X/**). Matching is case-sensitive. A diff is doc-only only when every changed path matches, both sides of a rename and deleted and binary files included; an empty or absent list means no diff is doc-only. A pattern is never a string prefix.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
     "protectedPaths": {
-      "description": "Glob patterns of paths the Ralph agent must not change.",
+      "description": "Glob patterns of paths the Ralph agent must not change, with the syntax of docOnlyPathPatterns (an entry ending with / stands for all its content). Matching ignores letter case on every platform, and X/ also protects the path X itself (a file or link in place of the directory). The controller checks every entry of git status --porcelain -z -uall after each agent turn: new untracked files one by one, changes, deletions, both sides of a rename or copy, type changes and binary files by path regardless of content; .git/ is also checked by a fingerprint. The core always protects .git/ and .claude/ in addition. Edit/Write deny rules derived from these entries may be wider than the pattern, never narrower; the controller check decides.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
@@ -292,7 +302,7 @@
   ],
   "$defs": {
     "command": {
-      "description": "A command as an argument array (not a shell string) plus its working directory. The strings are passed as they are: the token {file} is substituted only inside hooks.lint[].command.argv and hooks.typecheck[].command.argv (see hookCommand); in install and gate commands it is a plain literal.",
+      "description": "A command as an argument array (not a shell string) plus its working directory. The strings are passed as they are: the token {file} is substituted only inside hooks.lint[].command.argv and hooks.typecheck[].command.argv (see hookCommand); in install, gate and dependencySync commands it is a plain literal.",
       "type": "object",
       "additionalProperties": false,
       "required": ["argv", "cwd"],

@@ -1,0 +1,270 @@
+'use strict';
+
+// Test support for the portable Ralph controller tests: neutral consumer repositories made with a
+// real local git (no network), a profile copy with the settings an enabled controller needs, and
+// replacements at the process boundary — gh through child_process, Docker through the sandbox
+// runtime. Nothing here reaches GitHub, Docker or a model.
+
+const childProcess = require('node:child_process');
+const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { PassThrough, Writable } = require('node:stream');
+const { loadProfile } = require('../../profile/load');
+const { profileCopy } = require('./profiles');
+const sandbox = require('../../ralph/sandbox');
+const { BASE_SKILLS } = require('../../profile/skill-rules');
+
+const HUMAN_VERDICT = 'NEEDS.HUMAN+';
+const HUMAN_LABEL = 'needs-human';
+
+/** A temporary directory removed when the test ends (real path, so links do not confuse paths). */
+/** @type {(...args: any[]) => any} */
+const tempDir = (t, prefix = 'ralph-') => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+};
+
+/** Git without the operator's global or system config, with a fixed identity, for this test. */
+const isolateGit = (t) => {
+  const dir = tempDir(t, 'ralph-gitcfg-');
+  const empty = path.join(dir, 'empty.gitconfig');
+  fs.writeFileSync(empty, '');
+  const values = {
+    GIT_CONFIG_GLOBAL: empty,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@example.invalid',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@example.invalid',
+  };
+  const saved = {};
+  for (const [name, value] of Object.entries(values)) {
+    saved[name] = process.env[name];
+    process.env[name] = value;
+  }
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+};
+
+const realExecFileSync = childProcess.execFileSync;
+const gitIn = (cwd, ...args) => String(realExecFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).trim();
+
+const writeFiles = (root, files) => {
+  for (const [file, content] of Object.entries(files)) {
+    const full = path.join(root, file);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  }
+};
+
+const IGNORED = '.claude/settings.local.json\n.claude/skills/\nnode_modules/\n';
+
+/**
+ * A bare origin with one commit on `defaultBranch` and a consumer root cloned from it.
+ * @returns {{ origin: string, consumerRoot: string, scratch: string }}
+ */
+/** @type {(...args: any[]) => any} */
+const makeConsumer = (t, { files = {}, defaultBranch = 'trunk' } = {}) => {
+  const scratch = tempDir(t, 'ralph-consumer-');
+  const seed = path.join(scratch, 'seed');
+  fs.mkdirSync(seed);
+  gitIn(seed, 'init', '-q', '-b', defaultBranch);
+  writeFiles(seed, { '.gitignore': IGNORED, 'README.md': 'neutral\n', ...files });
+  gitIn(seed, 'add', '-A');
+  gitIn(seed, 'commit', '-qm', 'init');
+  const origin = path.join(scratch, 'origin.git');
+  gitIn(scratch, 'clone', '-q', '--bare', seed, origin);
+  const consumerRoot = path.join(scratch, 'consumer');
+  gitIn(scratch, 'clone', '-q', origin, consumerRoot);
+  return { origin, consumerRoot, scratch };
+};
+
+/** Makes Ralph's controller settings complete on a fixture profile copy. */
+const enableController = (profile) => {
+  profile.ralph = { ...profile.ralph, enabled: true, techDebtTrackerIssue: profile.ralph?.techDebtTrackerIssue ?? 5, enabledSteps: [], humanNeededVerdict: HUMAN_VERDICT };
+  profile.labels = { ...profile.labels, humanNeeded: HUMAN_LABEL };
+};
+
+/** A loaded profile: a fixture copy with complete controller settings, then `mutate`. */
+/** @type {(...args: any[]) => any} */
+const controllerProfile = (t, fixture, mutate = (_profile) => {}) =>
+  loadProfile(
+    profileCopy(t, fixture, (profile) => {
+      enableController(profile);
+      mutate(profile);
+    }),
+  );
+
+/**
+ * Replaces child_process.execFileSync for gh (answered by `onGh`) and forbids Docker or any other
+ * program but git, which runs for real. Every call is recorded with its cwd.
+ */
+/** @type {(...args: any[]) => any} */
+const mockGh = (t, onGh = () => '') => {
+  const calls = [];
+  t.mock.method(childProcess, 'execFileSync', (file, args = [], options = {}) => {
+    calls.push({ file, args, cwd: options.cwd });
+    if (file === 'git') return realExecFileSync(file, args, options);
+    if (file === 'gh') {
+      const out = onGh(args, options);
+      return options.encoding ? String(out ?? '') : Buffer.from(String(out ?? ''));
+    }
+    throw new Error(`unexpected host process ${file}`);
+  });
+  for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'fork']) {
+    t.mock.method(childProcess, name, (file) => {
+      throw new Error(`a host process was started through ${name}: ${file}`);
+    });
+  }
+  return calls;
+};
+
+/** A gh stand-in that answers the calls of one controller run and records the mutations. */
+/** @type {(...args: any[]) => any} */
+const fakeGitHub = ({ body = '', labels = ['ralph-blocked', HUMAN_LABEL], prUrl = 'https://example.invalid/pr/1' } = {}) => {
+  const mutations = [];
+  const onGh = (args) => {
+    const [group, action] = args;
+    if (group === 'label' && action === 'list') return JSON.stringify(labels.map((name) => ({ name })));
+    if (group === 'issue' && action === 'view') return body;
+    if (group === 'api') return '';
+    if (group === 'pr' && action === 'create') {
+      mutations.push({ kind: 'pr', args });
+      return prUrl;
+    }
+    if (group === 'issue' && action === 'comment') {
+      mutations.push({ kind: 'comment', issue: args[2], body: args[args.indexOf('--body') + 1] });
+      return '';
+    }
+    if (group === 'issue' && action === 'edit') {
+      const labelIndex = args.indexOf('--add-label');
+      mutations.push(labelIndex === -1 ? { kind: 'edit', issue: args[2], args } : { kind: 'label', issue: args[2], label: args[labelIndex + 1] });
+      return '';
+    }
+    throw new Error(`unexpected gh call: ${args.join(' ')}`);
+  };
+  return { onGh, mutations };
+};
+
+const okResult = (name = 'container') => ({ status: 0, stdout: 'ok', stderr: '', error: null, name });
+
+/**
+ * Replaces the sandbox runtime. `onAgent({ pass, prompt, spec, runDir })` returns the agent's text
+ * (after changing files if it likes); `onRun(spec)` answers sync runs (installs, sync, gate).
+ */
+/** @type {(...args: any[]) => any} */
+const mockSandbox = (t, { onAgent = () => 'DONE', onRun = () => okResult(), proxy = true } = {}) => {
+  const runs = [];
+  const agents = [];
+  const proxies = [];
+  t.mock.method(sandbox, 'startProxy', (spec) => {
+    if (!proxy) throw new Error('Docker is not available, the Ralph sandbox needs a running Docker engine');
+    proxies.push(spec);
+    return { name: 'proxy', network: 'run-net', proxyUrl: 'http://proxy:3128', stop: () => proxies.push('stopped') };
+  });
+  t.mock.method(sandbox, 'runInSandboxSync', (spec, options) => {
+    runs.push({ spec, options });
+    return onRun(spec);
+  });
+  t.mock.method(sandbox, 'spawnInSandbox', (spec) => {
+    const pass = path.basename(spec.sessionsDir || '').replace(/^\d+-/, '');
+    const child = new EventEmitter();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    let prompt = '';
+    const stdin = new Writable({
+      write(chunk, _encoding, callback) {
+        prompt += chunk;
+        callback();
+      },
+      final(callback) {
+        callback();
+        setImmediate(() => {
+          agents.push({ pass, prompt, spec });
+          const text = onAgent({ pass, prompt, spec, runDir: spec.runDir });
+          stdout.write(`${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } })}\n`);
+          stdout.write(`${JSON.stringify({ type: 'result', is_error: false, total_cost_usd: 0.01 })}\n`);
+          stdout.end();
+          stderr.end();
+          setImmediate(() => child.emit('close', 0));
+        });
+      },
+    });
+    Object.assign(child, { stdin, stdout, stderr, kill: () => {} });
+    return { child, name: `agent-${agents.length}`, stop: () => {} };
+  });
+  return { runs, agents, proxies };
+};
+
+/** Creates the base skill directories in the clone, like the package setup does after install. */
+const installBaseSkills = (runDir) => {
+  for (const name of BASE_SKILLS) fs.mkdirSync(path.join(runDir, '.claude', 'skills', name), { recursive: true });
+};
+
+const SELF_REPORT_FULL = (count) =>
+  ['=== ACCEPTANCE CRITERIA SELF-REPORT ===', ...Array.from({ length: count }, (_, i) => `${i + 1}. COVERED: test ${i + 1}`), '=== END ACCEPTANCE CRITERIA SELF-REPORT ==='].join('\n');
+
+const done = (type, summary, report = '') => `${report}\nDONE\nTYPE: ${type}\nSUMMARY: ${summary}`;
+
+/** An issue whose Affects names `paths`. */
+/** @type {(...args: any[]) => any} */
+const issueWith = (id, paths, { title = 'Neutral change', acCount = 2 } = {}) => ({
+  id,
+  title,
+  dependsOn: [],
+  body: [
+    '## Context',
+    'x',
+    '## Affects',
+    ...paths.map((p) => `- \`${p}\``),
+    '## Acceptance Criteria',
+    ...Array.from({ length: acCount }, (_, i) => `- [ ] AC-${i + 1} [behavior] item ${i + 1}. Verify: a.test.js "t${i + 1}"`),
+    '## Dependencies',
+    'none',
+  ].join('\n'),
+});
+
+/** The run context the controller builds after its readiness checks. */
+/** @type {(...args: any[]) => any} */
+const runContext = (t, { consumerRoot, origin, profile, settings = {} }) => ({
+  consumerRoot,
+  profile,
+  settings: { issues: [], maxTurns: 20, ...settings },
+  originUrl: origin,
+  env: { ANTHROPIC_API_KEY: 'sk-test-placeholder' },
+  echo: { out: () => {}, err: () => {} },
+  sandboxEnv: {
+    sandboxConfig: sandbox.validateSandboxConfig(profile.sandbox),
+    runsRoot: path.join(tempDir(t, 'ralph-runs-'), 'runs'),
+    rootKey: 'testkey',
+    agentModel: 'test-model',
+  },
+});
+
+module.exports = {
+  HUMAN_VERDICT,
+  HUMAN_LABEL,
+  tempDir,
+  isolateGit,
+  gitIn,
+  writeFiles,
+  makeConsumer,
+  enableController,
+  controllerProfile,
+  mockGh,
+  fakeGitHub,
+  okResult,
+  mockSandbox,
+  installBaseSkills,
+  SELF_REPORT_FULL,
+  done,
+  issueWith,
+  runContext,
+};

@@ -170,3 +170,25 @@ test('example profiles keep sandbox settings', () => {
     assert.doesNotThrow(() => validateSandboxConfig(profile.sandbox));
   }
 });
+
+test('example profiles declare dependency sync and doc-only globs', () => {
+  const sync = (cwd) => [{ argv: ['npm', 'install', '--ignore-scripts'], cwd }];
+  const jobflow = loadProfile(jobflowRoot);
+  assert.deepEqual(jobflow.dependencySync, sync('.'));
+  assert.deepEqual(jobflow.apps.map((app) => app.dependencySync), [sync('apps/api'), sync('apps/web')]);
+  assert.deepEqual(jobflow.docOnlyPathPatterns, ['**/*.md', '**/docs/', '**/project-management/']);
+  assert.deepEqual(jobflow.protectedPaths, ['.claude/', 'scripts/', '.github/', '.husky/', '.git/', 'apps/api/prisma/prompts/', 'apps/api/knowledge-sources/']);
+
+  const cards = loadProfile(cardsRoot);
+  assert.equal(cards.dependencySync, undefined);
+  assert.deepEqual(cards.apps[0].dependencySync, sync('.'));
+  assert.deepEqual(cards.docOnlyPathPatterns, ['**/*.md', '**/docs/']);
+  assert.deepEqual(cards.protectedPaths, ['.claude/', 'scripts/', '.github/', '.husky/', '.git/', 'docs/']);
+
+  // The reference regexes matched these paths at any depth; the globs keep that.
+  const { isDocOnlyPath } = require('../../profile/path-patterns');
+  for (const file of ['README.md', 'apps/web/docs/x.ts', 'project-management/plan/a.txt', 'apps/api/project-management/x']) {
+    assert.ok(isDocOnlyPath(file, jobflow.docOnlyPathPatterns), file);
+  }
+  assert.ok(!isDocOnlyPath('apps/api/src/docs.ts', jobflow.docOnlyPathPatterns));
+});

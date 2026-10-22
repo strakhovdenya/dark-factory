@@ -44,3 +44,9 @@ test('npm test runs portable ralph tests and no real integrations', () => {
   const tsconfig = require('../../tsconfig.json');
   assert.ok(tsconfig.include.includes('ralph/**/*.js'), 'tsconfig checks ralph, proxy.js included');
 });
+
+test('ralph controller modules ship with their runtime dependency', () => {
+  const pkg = require('../../package.json');
+  assert.ok(pkg.dependencies.minimatch, 'profile/path-patterns.js needs minimatch at runtime');
+  assert.ok(pkg.scripts.test.includes('"ralph/**/*.test.js"'), 'tests of ralph and its subdirectories');
+});
