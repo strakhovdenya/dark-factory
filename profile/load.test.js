@@ -26,7 +26,7 @@ const MONOREPO = {
     claudeCodeVersion: '1.2.3',
     allowedHosts: ['registry.example.org'],
   },
-  ralph: { enabled: true, techDebtTrackerIssue: 12, enabledSteps: [] },
+  ralph: { enabled: true, techDebtTrackerIssue: 12 },
 };
 
 function makeProject(content) {
@@ -129,10 +129,10 @@ test('rejects unknown nested field naming its path', () => {
   assert.match(loadError({ ...SINGLE_PACKAGE, skillRules: [rule] }), /skillRules\[0\]\.exclude/);
 });
 
-test('rejects enabled ralph without step settings', () => {
+test('rejects enabled ralph without tech-debt tracker', () => {
   const message = loadError({ ...SINGLE_PACKAGE, ralph: { enabled: true } });
   assert.match(message, /ralph\.techDebtTrackerIssue/);
-  assert.match(message, /ralph\.enabledSteps/);
+  assert.doesNotMatch(message, /ralph\.enabledSteps/, 'an absent step list is the baseline pipeline');
 });
 
 test('rejects duplicate app names', () => {
@@ -190,7 +190,7 @@ test('validates judge settings in both fixture profiles', (t) => {
   }
 });
 
-const ENABLED_RALPH = { enabled: true, techDebtTrackerIssue: 1, enabledSteps: [] };
+const ENABLED_RALPH = { enabled: true, techDebtTrackerIssue: 1 };
 const withRalph = (extra = {}) => (profile) => {
   profile.ralph = { ...ENABLED_RALPH, ...extra };
 };

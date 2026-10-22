@@ -48,5 +48,5 @@
     "claudeCodeVersion": "2.1.283",
     "allowedHosts": ["registry.npmjs.org", "api.anthropic.com"]
   },
-  "ralph": { "enabled": true, "techDebtTrackerIssue": 1, "enabledSteps": [], "humanNeededVerdict": "BLOCKED-DB-CHANGE" }
+  "ralph": { "enabled": true, "techDebtTrackerIssue": 1, "humanNeededVerdict": "BLOCKED-DB-CHANGE", "stepBudgets": { "self-review": 4, "code-review": 2 } }
 }

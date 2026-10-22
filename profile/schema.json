@@ -266,10 +266,16 @@
           "pattern": "^(?!(?:DONE|BLOCKED|TYPE|SUMMARY|REVIEW|CODEREVIEW)$)[^\\s:]+$"
         },
         "enabledSteps": {
-          "description": "Names of optional Ralph steps switched on for this project. Steps not listed stay off. Required (may be empty) when Ralph is enabled.",
+          "description": "The complete Ralph step pipeline of this project, in run order. Absent means the baseline pipeline: implement, self-review, code-review, final-gate. An explicit list is the whole pipeline: \"implement\" is mandatory and first, \"final-gate\" is mandatory and last (each exactly once); \"self-review\" and \"code-review\" may be left out, and when both are listed \"self-review\" comes first; other registered steps go between them and run only when listed here. An empty list is invalid (it has no mandatory step). Names are checked against the step registry before the run starts.",
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 }
+        },
+        "stepBudgets": {
+          "description": "Fix budget per review step: step name -> integer >= 1, the number of fix calls after a fixable review failure (a budget of 4 allows at most five review calls). A step not named keeps its default (self-review and code-review: 2). Budgets are independent; the task's time and cost limits still apply. A key must name a registered step with a fix; a budget of a registered step that is not in enabledSteps is allowed and does not enable it.",
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "type": "integer", "minimum": 1 }
         }
       },
       "if": {
@@ -277,7 +283,7 @@
         "required": ["enabled"]
       },
       "then": {
-        "required": ["techDebtTrackerIssue", "enabledSteps"]
+        "required": ["techDebtTrackerIssue"]
       }
     }
   },

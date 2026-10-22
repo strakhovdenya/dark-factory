@@ -2,7 +2,7 @@
 
 // Portable tests of the controller state machine. A neutral consumer repository is a real local
 // git repository (no network); gh is replaced at the child_process boundary and Docker at the
-// sandbox runtime, so no GitHub, Docker or model is needed.
+// sandbox runtime, so no GitHub, Docker or model is needed (see `scenario` in test/helpers).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -14,20 +14,18 @@ const { FIXTURE_PROFILES } = require('../test/helpers/profiles');
 const {
   HUMAN_VERDICT,
   HUMAN_LABEL,
-  isolateGit,
   gitIn,
   writeFiles,
-  makeConsumer,
   controllerProfile,
-  mockGh,
-  fakeGitHub,
   okResult,
-  mockSandbox,
-  installBaseSkills,
   SELF_REPORT_FULL,
   done,
   issueWith,
   runContext,
+  APP_FILE,
+  defaultAgent,
+  scenario,
+  originBranches,
 } = require('../test/helpers/ralph');
 
 // --- publishChanges: commit -> push -> PR -> issue side effects ---
@@ -186,47 +184,11 @@ test('reports prepare_failed when the remote branch lookup fails', async (t) => 
 
 // --- runIssue end to end on neutral consumers ---
 
-const APP_FILE = { monorepo: 'packages/billing/src/a.ts', 'single-package': 'src/a.ts' };
-
-const defaultRun = (spec) => {
-  if (spec.network !== 'none') installBaseSkills(spec.runDir);
-  return okResult();
-};
-
-/** @type {(...args: any[]) => any} */
-const defaultAgent = (fixture, { implement } = {}) => ({ pass, runDir }) => {
-  if (pass === 'self-review') return 'REVIEW: PASS';
-  if (pass === 'code-review') return 'CODEREVIEW: PASS';
-  if (implement) return implement({ pass, runDir });
-  writeFiles(runDir, { [APP_FILE[fixture]]: `export const value = 1;\n` });
-  return done('feat', 'add the value', SELF_REPORT_FULL(2));
-};
-
-/** @type {(...args: any[]) => any} */
-const scenario = async (t, fixture, { mutate, files = {}, issue = issueWith(7, [APP_FILE[fixture]]), onAgent, onRun = defaultRun, labels, proxy = true } = {}) => {
-  isolateGit(t);
-  const profile = controllerProfile(t, fixture, mutate);
-  const { origin, consumerRoot } = makeConsumer(t, { files });
-  const gh = fakeGitHub({ body: issue.body, labels });
-  const calls = mockGh(t, gh.onGh);
-  const box = mockSandbox(t, { onAgent: onAgent || defaultAgent(fixture), onRun, proxy });
-  const ctx = runContext(t, { consumerRoot, origin, profile });
-  const result = await runIssue(ctx, new Map([[issue.id, { ...issue, status: 'not-started' }]]), issue);
-  const labelsSet = gh.mutations.filter((m) => m.kind === 'label').map((m) => m.label);
-  const comments = gh.mutations.filter((m) => m.kind === 'comment');
-  const prs = gh.mutations.filter((m) => m.kind === 'pr');
-  return { result, gh, calls, box, ctx, origin, consumerRoot, profile, labelsSet, comments, prs };
-};
-
-const originBranches = (origin) =>
-  gitIn(origin, 'for-each-ref', '--format=%(refname:short)', 'refs/heads')
-    .split('\n')
-    .filter(Boolean);
-
 for (const fixture of FIXTURE_PROFILES) {
   test(`preserves reference controller behaviour (${fixture})`, async (t) => {
     const run = await scenario(t, fixture);
-    assert.deepEqual(run.result, { status: 'done', pr: 'https://example.invalid/pr/1' });
+    const steps = ['implement', 'self-review', 'code-review', 'final-gate'].map((name) => ({ name, outcome: 'passed' }));
+    assert.deepEqual(run.result, { status: 'done', pr: 'https://example.invalid/pr/1', steps });
     const branch = 'task/ISSUE-7-neutral-change';
     assert.deepEqual(originBranches(run.origin).sort(), [branch, 'trunk']);
     assert.equal(gitIn(run.origin, 'log', '-1', '--format=%s', branch), 'feat: ISSUE-7 add the value');
@@ -307,6 +269,7 @@ for (const fixture of FIXTURE_PROFILES) {
     assert.match(comment, /Review fixes applied after the initial DONE:\*\*\n1\. review-fix summary\n2\. code-review-fix summary/);
     assert.match(comment, /все пункты покрыты, чек-боксы отмечены/, 'acceptance report from the last fix');
     assert.deepEqual(run.box.agents.map((a) => a.pass), ['implement', 'self-review', 'review-fix', 'self-review', 'code-review', 'code-review-fix', 'code-review']);
+    assert.deepEqual(run.result.steps.map((s) => s.outcome), ['passed', 'passed', 'passed', 'passed']);
   });
 
   test(`omits fix summaries when review passed (${fixture})`, async (t) => {
