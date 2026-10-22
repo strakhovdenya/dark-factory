@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "AI software factory: Ralph, Acceptance Verifier, Claude Code skills, agents and hooks",
+  "bin": {
+    "dark-factory-setup": "bin/setup.js"
+  },
   "files": [
+    "bin/",
     "skills/",
     "agents/",
     "hooks/",
@@ -13,10 +17,10 @@
     "ralph/"
   ],
   "scripts": {
-    "postinstall": "node .claude/scripts/setup-metaskills.js",
+    "postinstall": "node bin/setup.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"ralph/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\""
+    "test": "node --test \"*.test.js\" \"bin/**/*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"ralph/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\""
   },
   "engines": {
     "node": ">=22"

@@ -20,9 +20,8 @@ const {
   controllerProfile,
   mockGh,
   fakeGitHub,
-  okResult,
   mockSandbox,
-  installBaseSkills,
+  defaultRun,
   done,
   issueWith,
   tempDir,
@@ -253,10 +252,7 @@ test('uses explicit consumer root from foreign working directory', async (t) => 
       writeFiles(runDir, { 'packages/billing/src/a.ts': 'export {};\n' });
       return done('feat', 'x');
     },
-    onRun: (spec) => {
-      if (spec.network !== 'none') installBaseSkills(spec.runDir);
-      return okResult();
-    },
+    onRun: defaultRun,
   });
   const run = await drive(env, { classifyIssues: () => [{ ...issue, status: 'not-started', ready: true }], runOneIssue: require('./core').runIssue, processEnv: { ...process.env, ANTHROPIC_API_KEY: 'sk-test-placeholder' } });
   assert.equal(run.error, null, run.error && run.error.message);

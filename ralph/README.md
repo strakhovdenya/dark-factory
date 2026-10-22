@@ -10,12 +10,17 @@ The controller is in the package, but these stages are still missing; until they
 
 | Missing stage | What it adds |
 |---|---|
-| Skills setup in the clone | the package installs the required skills into the clone after the dependency install. Until then a required skill missing in the clone makes the issue BLOCKED before the agent |
 | Hooks | the skill-gate and lint/typecheck hooks of the package |
 | Docker integration tests | real-container proof of the sandbox protections (`test/integration/`); the reference Docker scenarios are recorded in `test/fixtures/ralph-controller/integration-cases.json` and are **not** verified by `npm test` |
 | Packed-package check in consumers | the controller run from the installed tarball |
 
 There is no host fallback at any stage: without Docker nothing runs.
+
+## Skills and agents setup in the clone
+
+Preparing a clone runs in this order: all installs of the root and of the apps, then the package's own setup, then the check of the required skills, then the agent permissions and the agent. Setup is clone preparation, not a step of the pipeline registry.
+
+The setup is `node_modules/dark-factory/bin/setup.js --consumer-root /workspace`, taken from the factory release **installed in the clone** (never from the controller's own version or a project script). It runs in the existing install sandbox: read-only `.git`, isolated git environment, the profile's `installEnv`, the step time limit and a log next to the install logs (`install-factory-setup-*.log`). The controller adds no hidden `npm install`: the package must be installed by the project's own install commands, and `--ignore-scripts` is fine because the controller runs setup itself. A non-zero exit, a timeout, a failure to start or a clone without the installed package is an `InstallError` for the step `factory-setup`: the issue is BLOCKED with no agent, no gate, no commit, no push and no PR, and nothing is run on the host. The clone's `.gitignore` must carry the named entries setup requires (see the root README).
 
 ## Inputs and the consumer root
 

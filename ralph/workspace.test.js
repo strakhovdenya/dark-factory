@@ -26,7 +26,10 @@ const {
   fakeGitHub,
   okResult,
   mockSandbox,
-  installBaseSkills,
+  defaultRun,
+  CLONE_MARKER,
+  isFactorySetup,
+  runSetupLocally,
   done,
   issueWith,
   runContext,
@@ -352,8 +355,7 @@ const scenario = async (t, fixture, { mutate, files = {}, implement, onRun, defa
     onRun: (spec) => {
       const answer = onRun ? onRun(spec) : null;
       if (answer) return answer;
-      if (spec.network !== 'none') installBaseSkills(spec.runDir);
-      return okResult();
+      return defaultRun(spec);
     },
   });
   const ctx = runContext(t, { consumerRoot, origin, profile });
@@ -386,6 +388,65 @@ const assertBlockedBeforeAgent = (run, step, cwd) => {
 };
 
 for (const fixture of FIXTURE_PROFILES) {
+  test(`runs factory setup in clone (${fixture})`, async (t) => {
+    const seen = {};
+    const run = await scenario(t, fixture, {
+      mutate: (p) => installSteps(fixture)(p),
+      implement: (runDir) => {
+        const skills = path.join(runDir, '.claude', 'skills');
+        seen.skills = fs.readdirSync(skills).sort();
+        seen.marker = fs.readFileSync(path.join(skills, 'issues', CLONE_MARKER.file.split('/').pop()), 'utf8');
+        seen.manifest = JSON.parse(fs.readFileSync(path.join(runDir, '.claude', '.factory-installed.json'), 'utf8')).copies;
+        seen.agents = fs.readdirSync(path.join(runDir, '.claude', 'agents')).sort();
+        seen.permissions = fs.readFileSync(path.join(runDir, '.claude', 'settings.local.json'), 'utf8');
+        return null;
+      },
+    });
+    assert.equal(run.result.status, 'done', JSON.stringify(run.result));
+    const specs = run.box.runs.map((r) => r.spec);
+    const setupIndexes = specs.flatMap((spec, index) => (isFactorySetup(spec) ? [index] : []));
+    assert.equal(setupIndexes.length, 1, 'setup runs once');
+    const [setupIndex] = setupIndexes;
+    assert.deepEqual(specs.slice(0, setupIndex).map((spec) => spec.command.join(' ')).filter((command) => command.startsWith('tool ')), ['tool root-1', 'tool root-2', ...run.ctx.profile.apps.map((app) => `tool install-${app.name}`)], 'after every install');
+    assert.ok(specs.slice(setupIndex + 1).every((spec) => !specs.slice(0, setupIndex).includes(spec)));
+    assert.ok(!specs.slice(setupIndex + 1).some((spec) => spec.command.join(' ').startsWith('tool root') || spec.command.join(' ').startsWith('tool install')), 'no install after setup');
+    const spec = specs[setupIndex];
+    assert.deepEqual(spec.command, ['node', workspace.FACTORY_SETUP_SCRIPT, '--consumer-root', sandbox.CONTAINER_WORKDIR]);
+    assert.equal(spec.readOnlyGit, true);
+    assert.equal(spec.network, 'run-net');
+    assert.equal(spec.workdir, '');
+    assert.ok(specs.findIndex((candidate) => candidate.network === 'none') > setupIndex, 'the gate runs after setup');
+
+    const skillSet = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'skills', 'base-set.json'), 'utf8'));
+    const expectedSkills = [...skillSet.processSkills, ...skillSet.jsMetaskills].map((entry) => entry.name).sort();
+    assert.deepEqual(seen.skills, expectedSkills, 'the whole set, no code-review');
+    assert.equal(seen.marker, CLONE_MARKER.text, 'copies come from the package installed in the clone');
+    assert.deepEqual(seen.agents, skillSet.agents.map((entry) => `${entry.name}.md`).sort());
+    assert.equal(seen.manifest.length, expectedSkills.length + skillSet.agents.length);
+    assert.ok(seen.permissions.includes('Skill(js-gof)'));
+    assert.ok(!seen.permissions.includes('Skill(code-review)'));
+  });
+
+  test(`blocks run when factory setup fails (${fixture})`, async (t) => {
+    const variants = {
+      'non-zero exit': (spec) => (isFactorySetup(spec) ? { status: 3, stdout: '', stderr: 'conflict', error: null, name: 'c' } : null),
+      'cannot start': (spec) => (isFactorySetup(spec) ? { status: null, stdout: '', stderr: '', error: new Error('ETIMEDOUT'), name: 'c' } : null),
+      'package not installed in the clone': (spec) => (isFactorySetup(spec) ? runSetupLocally(spec) : spec.network === 'none' ? null : okResult()),
+    };
+    for (const [label, onRun] of Object.entries(variants)) {
+      const run = await scenario(t, fixture, { mutate: (p) => installSteps(fixture)(p), onRun });
+      assert.equal(run.result.status, 'blocked', label);
+      assert.match(run.result.reason, /factory-setup/, label);
+      assert.equal(run.box.agents.length, 0, `${label}: no agent`);
+      assert.ok(!run.box.runs.some((r) => r.spec.network === 'none'), `${label}: no gate`);
+      assert.equal(run.prs.length, 0, `${label}: no PR`);
+      assert.ok(run.labels.includes(BLOCK_LABEL), label);
+      assert.equal(run.box.runs.filter((r) => isFactorySetup(r.spec)).length, 1, label);
+      assert.ok(!run.calls.some((call) => call.file === 'node'), `${label}: nothing on the host`);
+      t.mock.restoreAll();
+    }
+  });
+
   test(`root install failure blocks before further execution (${fixture})`, async (t) => {
     for (const failing of ['tool root-1', 'tool root-2']) {
       const run = await scenario(t, fixture, { mutate: (p) => installSteps(fixture)(p), onRun: failingRun(failing) });

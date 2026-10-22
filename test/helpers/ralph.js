@@ -14,7 +14,7 @@ const { PassThrough, Writable } = require('node:stream');
 const { loadProfile } = require('../../profile/load');
 const { profileCopy } = require('./profiles');
 const sandbox = require('../../ralph/sandbox');
-const { BASE_SKILLS } = require('../../profile/skill-rules');
+const { gitignoreText, installFactoryPackage, runSetupScript } = require('./factory-package');
 const { freezeSnapshot } = require('../../ralph/trusted-profile');
 
 const HUMAN_VERDICT = 'NEEDS.HUMAN+';
@@ -65,7 +65,8 @@ const writeFiles = (root, files) => {
   }
 };
 
-const IGNORED = '.claude/settings.local.json\n.claude/skills/\nnode_modules/\n';
+// Named entries for every copy the package setup lays out, as the setup requires.
+const IGNORED = gitignoreText();
 
 /** The text of a profile committed into a fixture repository: an object is serialized, a string is kept as is. */
 const profileText = (profile) => (typeof profile === 'string' ? profile : JSON.stringify(profile));
@@ -219,9 +220,32 @@ const mockSandbox = (t, { onAgent = () => 'DONE', onRun = () => okResult(), prox
   return { runs, agents, proxies };
 };
 
-/** Creates the base skill directories in the clone, like the package setup does after install. */
-const installBaseSkills = (runDir) => {
-  for (const name of BASE_SKILLS) fs.mkdirSync(path.join(runDir, '.claude', 'skills', name), { recursive: true });
+/** Marks the package installed in a clone, so its set is distinguishable from the controller's own. */
+const CLONE_MARKER = { file: 'skills/issues/CLONE-MARKER.md', text: 'installed in the clone\n' };
+
+let installedTemplate = null;
+
+/** What `npm install` of the factory leaves in the clone's node_modules: the package and its pinned metaskills. */
+const installFactoryInClone = (runDir) => {
+  const target = path.join(runDir, 'node_modules');
+  if (fs.existsSync(path.join(target, 'dark-factory'))) return;
+  if (!installedTemplate) {
+    installedTemplate = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-installed-package-'));
+    process.on('exit', () => fs.rmSync(installedTemplate, { recursive: true, force: true }));
+    installFactoryPackage(installedTemplate);
+    writeFiles(path.join(installedTemplate, 'dark-factory'), { [CLONE_MARKER.file]: CLONE_MARKER.text });
+  }
+  fs.cpSync(installedTemplate, target, { recursive: true });
+};
+
+const isFactorySetup = (spec) => String(spec.command[1] || '').endsWith('node_modules/dark-factory/bin/setup.js');
+
+/** The sandbox step replaced by a local Node process: the real setup script of the clone's installed package. */
+const runSetupLocally = (spec) => {
+  const toHost = (arg) => (arg.startsWith(sandbox.CONTAINER_WORKDIR) ? path.join(spec.runDir, arg.slice(sandbox.CONTAINER_WORKDIR.length)) : arg);
+  const [, script, ...args] = spec.command.map(toHost);
+  const result = runSetupScript(script, { args, cwd: spec.runDir });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, error: null, name: 'setup' };
 };
 
 const SELF_REPORT_FULL = (count) =>
@@ -270,9 +294,10 @@ const runContext = (t, { consumerRoot, origin, profile, settings = {}, stepRegis
 /** The application file the default agent changes in each fixture profile. */
 const APP_FILE = { monorepo: 'packages/billing/src/a.ts', 'single-package': 'src/a.ts' };
 
-/** Sandbox runs: an install (networked run) lays out the base skills; the gate (no network) passes. */
+/** Sandbox runs: an install (networked run) leaves the factory package in the clone, the setup run executes its real script; the gate (no network) passes. */
 const defaultRun = (spec) => {
-  if (spec.network !== 'none') installBaseSkills(spec.runDir);
+  if (isFactorySetup(spec)) return runSetupLocally(spec);
+  if (spec.network !== 'none') installFactoryInClone(spec.runDir);
   return okResult();
 };
 
@@ -329,7 +354,10 @@ module.exports = {
   fakeGitHub,
   okResult,
   mockSandbox,
-  installBaseSkills,
+  CLONE_MARKER,
+  installFactoryInClone,
+  isFactorySetup,
+  runSetupLocally,
   SELF_REPORT_FULL,
   done,
   issueWith,
