@@ -33,7 +33,7 @@ Git. Setup never changes tracked files, including `.gitignore`. The project must
 # ...one line per skill and agent of the set (a leading / and a trailing / for directories are fine)
 ```
 
-A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md).
+A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md).
 
 ## Optional elements
 

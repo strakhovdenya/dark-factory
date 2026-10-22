@@ -23,7 +23,8 @@ const MANIFEST_FORMAT_VERSION = 1;
 const SKILLS_DIR = '.claude/skills';
 const AGENTS_DIR = '.claude/agents';
 const SAFE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
-const COPY_PATH = /^\.claude\/(?:skills\/[A-Za-z0-9_][A-Za-z0-9._-]*|agents\/[A-Za-z0-9_][A-Za-z0-9._-]*\.md)$/;
+const NAME_PATTERN = SAFE_NAME.source.slice(1, -1);
+const COPY_PATH = new RegExp(`^\\.claude/(?:skills/${NAME_PATTERN}|agents/${NAME_PATTERN}\\.md)$`);
 const GIT_ENV_DROPPED = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX'];
 
 class SetupError extends Error {
@@ -193,7 +194,8 @@ const buildWanted = ({ packageRoot, profile }) => {
   const baseSet = loadBaseSet(packageRoot);
   const wanted = new Map();
   const add = (name, kind, destination, source) => {
-    if (!wanted.has(destination)) wanted.set(destination, { name, kind, destination, source, tree: null });
+    if (wanted.has(destination)) throw new SetupError(`"${name}" is listed twice in skills/base-set.json`);
+    wanted.set(destination, { name, kind, destination, source, tree: null });
   };
 
   const skillEntries = [...baseSet.processSkills, ...baseSet.jsMetaskills];
@@ -331,7 +333,8 @@ const buildPlan = ({ root, packageRoot }) => {
   const retired = listed.filter((destination) => !wantedPaths.has(destination));
   const problems = directoryProblems(root);
 
-  const tracked = gitOutput(root, ['ls-files', '-z']).split('\0').filter(Boolean).map((file) => file.toLowerCase());
+  const pathspecs = [...wantedPaths, ...retired, MANIFEST_PATH].map((target) => `:(icase,literal)${target}`);
+  const tracked = gitOutput(root, ['ls-files', '-z', '--', ...pathspecs]).split('\0').filter(Boolean).map((file) => file.toLowerCase());
   const trackedUnder = (target) => tracked.find((file) => file === target.toLowerCase() || file.startsWith(`${target.toLowerCase()}/`));
   for (const destination of [...wantedPaths, ...retired]) {
     const file = trackedUnder(destination);
