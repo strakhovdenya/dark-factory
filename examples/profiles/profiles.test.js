@@ -40,12 +40,13 @@ test('jobflow profile keeps current project values', () => {
   assert.equal(profile.labels.calibration, 'calibrate');
   assert.deepEqual(profile.judge, { enabled: true });
   assert.equal(profile.protectedPaths.length, 7);
-  assert.equal(profile.skillRules.length, 4);
+  assert.equal(profile.skillRules.length, 2);
   assert.deepEqual(
     profile.skillRules.map((rule) => rule.path),
-    ['apps/api', 'apps/web', 'scripts', '.claude/ralph'],
+    ['apps/api', 'apps/web'],
   );
   assert.equal(profile.verifier.goldenDir, '.github/verifier/golden');
+  assert.equal(profile.docs.adr, 'project-management/DECISIONS.md');
   // Every check the verifier ran before checks became modules stays on, so
   // the project's verdicts do not change.
   assert.deepEqual(profile.verifier.checks, CORE_CHECK_NAMES);
