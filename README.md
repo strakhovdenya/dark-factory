@@ -35,6 +35,28 @@ Git. Setup never changes tracked files, including `.gitignore`. The project must
 
 A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md).
 
+## PRD and plan templates
+
+The `prd` and `plan` skills get their template from the installed package, so the shared structure and the section instructions live in one place (`skills/templates.js`) and a project adds its own sections without copying anything:
+
+```sh
+node "<root>/node_modules/dark-factory/skills/templates.js" <prd|plan> --project "<root>"
+```
+
+`<root>` is the explicit absolute root of the consumer project; the module path is built from it, so the command works from any current directory, including a copied skill directory. The command reads the profile with `loadProfile`, prints the Markdown to stdout and creates no document. Any error (unknown kind, a missing `--project`, an invalid profile or overlay) exits non-zero with the reason on stderr and prints no template: there is no fallback to the base. Only `prd` and `plan` exist; the issue structure is not a template of this command.
+
+Overlay. The profile can set `overlays.prd` and `overlays.plan` to a path relative to `.factory/overlays/` of the project. Without a setting the output is the base template. Only the overlay of the requested kind is read, and `loadProfile` never opens overlay files. The file is JSON of exactly this shape:
+
+```json
+{ "sections": [{ "title": "Additional section", "body": "Instructions" }] }
+```
+
+`sections` is an array (it may be empty). `title` is a non-empty single-line string, `body` a string; unknown fields, wrong types and invalid JSON are errors. The sections are added after the whole base, in array order, with their body. An overlay can only add: `removeSections` is always rejected (so is renaming by remove and add), and a title equal to a base section or its alias (`Acceptance Criteria` for «Критерии готовности (Acceptance Criteria)») or to another addition is rejected; titles are compared ignoring case and runs of whitespace. The path must be relative, without a `..` segment, and the file must stay inside `.factory/overlays/` also after symlinks are resolved; a reference to a missing file is an error naming the path. See `examples/profiles/*/.factory/overlays/prd.json`.
+
+The structure of an issue has one mechanism only: the issue contract and the project overlay `.github/verifier/issue-contract.overlay.json`. `overlays.issue` is not a profile field and is rejected.
+
+The base branch of an epic is named by the existing `branchNameFor` of `profile/branch.js` from the profile's `branchTemplate`, the tracking issue number and the short epic name with the suffix `-base`; the skills do not carry a branch prefix.
+
 ## Optional elements
 
 **Calibration Judge** (`judge/`, reusable workflow `.github/workflows/calibration-judge.yml`) analyses failed Acceptance Verifier rounds and attributes each failure to the issue, the implementation, the verifier or the infrastructure, so the owner can calibrate the verifier and the issue skills. It only observes: it never changes a verdict, a status or a label. It is **off by default**: a project turns it on with `judge.enabled: true` and `labels.calibration` in its profile and a short wrapper (`examples/wrappers/calibration-judge.yml`). Every verifier round stores a snapshot of the rules it used, so Judge reads the rules of a past round from that round and never from the project's current settings.

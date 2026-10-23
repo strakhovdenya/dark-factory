@@ -192,3 +192,57 @@ test('example profiles declare dependency sync and doc-only globs', () => {
   }
   assert.ok(!isDocOnlyPath('apps/api/src/docs.ts', jobflow.docOnlyPathPatterns));
 });
+
+const { buildTemplate, renderTemplate, validateOverlay } = require('../../skills/templates');
+
+const readOverlay = (root, name) => JSON.parse(fs.readFileSync(path.join(root, '.factory', 'overlays', name), 'utf8'));
+
+test('example template overlays exist and render their project sections', () => {
+  const baseTitles = (markdown) => markdown.split('\n').filter((line) => line.startsWith('## ')).map((line) => line.slice(3));
+  const base = baseTitles(renderTemplate('prd'));
+  const expected = [
+    [jobflowRoot, ['Влияние на конечный автомат', 'Влияние на модель данных', 'API-поверхность']],
+    [cardsRoot, ['Влияние на данные и схему Supabase', 'Влияние на UI']],
+  ];
+  for (const [root, titles] of expected) {
+    assert.deepEqual(loadProfile(root).overlays, { prd: 'prd.json' });
+    const overlay = readOverlay(root, 'prd.json');
+    assert.deepEqual(overlay.sections.map((section) => section.title), titles);
+    for (const section of overlay.sections) assert.ok(section.body.trim().length > 0, section.title);
+    const out = buildTemplate('prd', root);
+    assert.deepEqual(baseTitles(out), [...base, ...titles]);
+    assert.ok(!renderTemplate('prd').includes(titles[0]), 'project sections are not in the shared base');
+  }
+
+  const body = (title) => readOverlay(jobflowRoot, 'prd.json').sections.find((section) => section.title === title).body;
+  const machine = body('Влияние на конечный автомат');
+  assert.ok(machine.includes('| Action | Precondition | Field A after | Field B after | Status after |'));
+  assert.match(machine, /Не применимо: фича не меняет состояние/);
+  assert.match(body('Влияние на модель данных'), /сущност.*миграци/s);
+  const api = body('API-поверхность');
+  assert.match(api, /HTTP endpoints, CLI, события/);
+  assert.match(api, /правила проекта требуют описания интерфейсов/);
+});
+
+test('example overlay checks detect invalid references and accept empty additions', (t) => {
+  const copyOf = (root) => {
+    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'example-overlay-'));
+    t.after(() => fs.rmSync(copy, { recursive: true, force: true }));
+    fs.cpSync(path.join(root, '.factory'), path.join(copy, '.factory'), { recursive: true });
+    return copy;
+  };
+  for (const root of [jobflowRoot, cardsRoot]) {
+    const missing = copyOf(root);
+    fs.rmSync(path.join(missing, '.factory', 'overlays', 'prd.json'));
+    assert.throws(() => buildTemplate('prd', missing), (error) => error.message.includes('prd.json'));
+
+    const invalid = copyOf(root);
+    fs.writeFileSync(path.join(invalid, '.factory', 'overlays', 'prd.json'), '{"sections":[{"title":"Цель","body":"x"}]}');
+    assert.throws(() => buildTemplate('prd', invalid), (error) => error.message.includes('prd.json') && error.message.includes('Цель'));
+
+    const empty = copyOf(root);
+    fs.writeFileSync(path.join(empty, '.factory', 'overlays', 'prd.json'), '{"sections":[]}');
+    assert.equal(buildTemplate('prd', empty), renderTemplate('prd'));
+  }
+  assert.deepEqual(validateOverlay('plan', { sections: [] }, 'x'), []);
+});

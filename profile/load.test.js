@@ -489,3 +489,28 @@ test('dependency sync of root and apps uses shared command contract', (t) => {
     }
   }
 });
+
+test('accepts prd and plan template overlay settings in both profiles', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const overlays of [undefined, {}, { prd: 'prd.json' }, { prd: 'prd.json', plan: 'nested/plan.json' }]) {
+      const root = profileCopy(t, fixture, (profile) => {
+        if (overlays !== undefined) profile.overlays = overlays;
+      });
+      // The files do not exist: the loader checks the setting, it does not read overlay files.
+      assert.deepEqual(loadProfile(root).overlays, overlays, fixture);
+    }
+  }
+});
+
+test('rejects issue template overlay in both profiles', (t) => {
+  const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
+  for (const fixture of FIXTURE_PROFILES) {
+    for (const overlays of [{ issue: 'issue.json' }, { prd: 'prd.json', issue: 'issue.json' }]) {
+      const root = profileCopy(t, fixture, (profile) => {
+        profile.overlays = overlays;
+      });
+      assert.throws(() => loadProfile(root), /overlays\.issue: unknown field/, fixture);
+    }
+  }
+});

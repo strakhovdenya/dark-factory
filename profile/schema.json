@@ -161,13 +161,12 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "overlays": {
-      "description": "Project overlays of document templates, relative to .factory/overlays/. An overlay can only add to a core template.",
+      "description": "Project overlays of the PRD and plan templates: a path relative to .factory/overlays/ of a JSON file {\"sections\": [{\"title\", \"body\"}]} whose sections are added after the base template. An overlay can only add to a core template. The issue structure is not here: it is the issue contract and its overlay .github/verifier/issue-contract.overlay.json.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "prd": { "description": "Overlay file for the PRD template.", "type": "string", "minLength": 1 },
-        "plan": { "description": "Overlay file for the plan template.", "type": "string", "minLength": 1 },
-        "issue": { "description": "Overlay file for the issue template.", "type": "string", "minLength": 1 }
+        "plan": { "description": "Overlay file for the plan template.", "type": "string", "minLength": 1 }
       }
     },
     "docs": {
