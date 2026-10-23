@@ -11,18 +11,25 @@ The controller is in the package, but these stages are still missing; until they
 | Missing stage | What it adds |
 |---|---|
 | Hooks | the skill-gate and lint/typecheck hooks of the package |
-| Packed-package check in consumers | the controller run from the installed tarball |
 | Real Claude run in a consumer | a bounded run of the pinned `claude` CLI with the real `buildClaudeArgs` flags and the `code-review` skill |
 
 There is no host fallback at any stage: without Docker nothing runs.
 
-## Three levels of verification
+## Levels of verification
 
 | Level | Command | Where it runs | What it proves |
 |---|---|---|---|
 | Portable | `npm test` | Linux and Windows, no Docker, no network, no AI | the controller, the sandbox arguments and policies, with processes replaced at the `child_process` boundary |
+| Packed package | `npm test` (`test/installed-ralph.test.js`) | Linux and Windows, no Docker, no network, no AI | the real `npm pack` tarball installed in a monorepo and a single-package consumer: the installed CLI, the profile lookup and the clone's real setup, up to the controller's PR call |
 | Docker integration | `npm run prepare:ralph:sandbox`, then `npm run test:ralph:sandbox` | Linux host (WSL included) with a Linux Docker engine and BuildKit | the real containers, mounts, networks, proxy, npm, time limits and cleanup, with a stub agent |
 | Real Claude | a separate task | a consumer | the pinned CLI with the real flags and the `code-review` skill |
+
+### Packed package
+
+- **What is installed.** The tarball of `npm pack` of the current checkout, unpacked as `node_modules/dark-factory` in temporary consumers outside the checkout, with the full runtime closure of its packed `dependencies` (resolved through `package-lock.json`, copied from packages already installed by `npm ci`, no registry and no devDependencies). The run clone gets the same tarball and closure as its install step; nothing is copied from the checkout's sources and no `NODE_PATH` is set.
+- **What runs for real.** The installed `ralph/run.js` as its own Node process (absolute path of the entry point, started from a subdirectory, no `--consumer-root`), git against a local bare origin, and the clone's own `bin/setup.js`.
+- **What is replaced.** `test/fixtures/installed-ralph/boundary.js`, preloaded into the controller process, answers gh, emulates the Docker CLI (installs lay out the tarball, the gate succeeds, `factory-setup` runs the real setup on the host) and starts a stub agent instead of `claude`. It proves the delivery is complete and works in both consumer forms; it proves nothing about container isolation (Docker integration) or the real Claude CLI and its `code-review` skill (real Claude run).
+- **Success** is the `done` result in `state.json` and the controller's own `gh pr create` call, not the exit code: the CLI returns 0 after a BLOCKED issue too.
 
 ### Docker integration
 
@@ -46,8 +53,10 @@ The setup is `node_modules/dark-factory/bin/setup.js --consumer-root /workspace`
 The controller never uses the directory of the installed package. The current directory is only the starting point of the root search (or the base of a relative CLI path); after the root is known every git and gh call has an explicit cwd.
 
 ```sh
-# from the consumer repository or any of its subdirectories
+# from the consumer root
 node node_modules/dark-factory/ralph/run.js [--config <local-config.json>] [--max-iterations <n>]
+# from any subdirectory: the absolute path of the installed entry point
+node "$(git rev-parse --show-toplevel)/node_modules/dark-factory/ralph/run.js" [--config <local-config.json>] [--max-iterations <n>]
 # or for any location
 node node_modules/dark-factory/ralph/run.js --consumer-root <path> [--config <local-config.json>] [--max-iterations <n>]
 ```

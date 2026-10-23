@@ -20,7 +20,7 @@
     "postinstall": "node bin/setup.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"*.test.js\" \"bin/**/*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"ralph/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\"",
+    "test": "node --test \"*.test.js\" \"bin/**/*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"ralph/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\" \"test/installed-ralph.test.js\"",
     "prepare:ralph:sandbox": "node test/integration/prepare-ralph-sandbox.js",
     "test:ralph:sandbox": "node test/integration/run-ralph-sandbox.js"
   },
