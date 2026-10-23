@@ -4,14 +4,13 @@ Ralph executes GitHub issues of a consumer project (a repository that installed 
 
 Ralph is **off by default** (`ralph.enabled` in the profile). In this repository it stays disabled.
 
-## Status: not ready to run from an installed package
+## Status: implemented, not yet confirmed with a real Claude run
 
-The controller is in the package, but these stages are still missing; until they are done the controller is not declared ready, and a CLI run without the configuration below stops before doing anything:
+The controller, its setup in the clone and the hooks of the package (the closure and skill gates and the lint and typecheck helpers, see [../hooks/README.md](../hooks/README.md)) are delivered. One stage is still open; until it is done the controller is not declared ready, and a CLI run without the configuration below stops before doing anything:
 
-| Missing stage | What it adds |
+| Open stage | What it adds |
 |---|---|
-| Hooks | the skill-gate and lint/typecheck hooks of the package |
-| Real Claude run in a consumer | a bounded run of the pinned `claude` CLI with the real `buildClaudeArgs` flags and the `code-review` skill |
+| Real Claude run in a consumer (#48) | a bounded run of the pinned `claude` CLI from an installed release with the real `buildClaudeArgs` flags and the `code-review` skill |
 
 There is no host fallback at any stage: without Docker nothing runs.
 
@@ -22,7 +21,7 @@ There is no host fallback at any stage: without Docker nothing runs.
 | Portable | `npm test` | Linux and Windows, no Docker, no network, no AI | the controller, the sandbox arguments and policies, with processes replaced at the `child_process` boundary |
 | Packed package | `npm test` (`test/installed-ralph.test.js`) | Linux and Windows, no Docker, no network, no AI | the real `npm pack` tarball installed in a monorepo and a single-package consumer: the installed CLI, the profile lookup and the clone's real setup, up to the controller's PR call |
 | Docker integration | `npm run prepare:ralph:sandbox`, then `npm run test:ralph:sandbox` | Linux host (WSL included) with a Linux Docker engine and BuildKit | the real containers, mounts, networks, proxy, npm, time limits and cleanup, with a stub agent |
-| Real Claude | a separate task | a consumer | the pinned CLI with the real flags and the `code-review` skill |
+| Real Claude | a separate task (#48) | a consumer | the pinned CLI with the real flags and the `code-review` skill |
 
 ### Packed package
 

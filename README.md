@@ -4,7 +4,15 @@ The shared core of an AI software factory: **Ralph** (an autonomous agent that e
 
 Projects install a pinned release of the package and supply project-specific values only through their own `.factory/profile.json` and overlays. Nothing project-specific lives in the core.
 
-> Status: bootstrap. The package has no release yet; the repository is being built phase by phase.
+> Status: bootstrap. The package has no release yet; the repository is being built phase by phase. What is implemented (setup, `factory doctor`, the verifier, Judge, the hooks, the Ralph controller) is described below and in the guides; a live run of the pinned `claude` CLI from an installed release, hooks and Ralph included, is not confirmed yet (#48).
+
+## Guides
+
+Step-by-step instructions live in `docs/` of this repository. They are not part of the installed package; read them at the release tag you use.
+
+- [Connecting a project](docs/connecting-a-project.md): the order of installation, profile, trusted configs, GitHub settings, wrappers, hooks, the optional Ralph and Judge, and what `factory doctor` does and does not prove.
+- [Upgrading the pinned release](docs/upgrading.md): moving the tag, the lock and the commit SHA of every wrapper in one PR, and recovery when the hooks block Claude Code.
+- [Adding a setting](docs/adding-a-setting.md): adding a field to an existing mechanism, with `ralph.stepBudgets` as the worked example. A new step, check, hook or skill follows [CLAUDE.md](CLAUDE.md).
 
 ## Repository layout
 
@@ -33,7 +41,7 @@ Git. Setup never changes tracked files, including `.gitignore`. The project must
 # ...one line per skill and agent of the set (a leading / and a trailing / for directories are fine)
 ```
 
-A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md).
+A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md). The full order of a first connection (profile, install with `--ignore-scripts`, exclusions, setup, hooks) is in [docs/connecting-a-project.md](docs/connecting-a-project.md).
 
 ## Checking a project: `factory doctor`
 
@@ -78,7 +86,7 @@ The base branch of an epic is named by the existing `branchNameFor` of `profile/
 
 **Calibration Judge** (`judge/`, reusable workflow `.github/workflows/calibration-judge.yml`) analyses failed Acceptance Verifier rounds and attributes each failure to the issue, the implementation, the verifier or the infrastructure, so the owner can calibrate the verifier and the issue skills. It only observes: it never changes a verdict, a status or a label. It is **off by default**: a project turns it on with `judge.enabled: true` and `labels.calibration` in its profile and a short wrapper (`examples/wrappers/calibration-judge.yml`). Every verifier round stores a snapshot of the rules it used, so Judge reads the rules of a past round from that round and never from the project's current settings.
 
-**Ralph** (`ralph/`) executes GitHub issues of a consumer project with Claude Code in a Docker sandbox; its controller owns every git and GitHub operation. It is **off by default** (`ralph.enabled`) and is not ready to run from an installed package yet: [ralph/README.md](ralph/README.md) lists its inputs and the stages still missing. In this repository it stays disabled.
+**Ralph** (`ralph/`) executes GitHub issues of a consumer project with Claude Code in a Docker sandbox; its controller owns every git and GitHub operation. It is **off by default** (`ralph.enabled`). The controller, its setup in the clone and the hooks are in the package; what is still missing is the live confirmation of a bounded run of the pinned `claude` CLI from a release (#48), so Ralph is not declared ready. [ralph/README.md](ralph/README.md) lists its inputs and the levels of verification. In this repository it stays disabled.
 
 ## Why plain JavaScript and not TypeScript
 
