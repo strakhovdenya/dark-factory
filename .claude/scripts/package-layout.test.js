@@ -5,9 +5,9 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { checkPackageLayout, checkRepository } = require('./package-layout');
 
-const GOOD = ['bin/', 'skills/', 'agents/', 'hooks/', 'profile/', 'verifier/', 'judge/', 'ralph/'];
+const GOOD = ['bin/', 'doctor/', 'skills/', 'agents/', 'hooks/', 'profile/', 'verifier/', 'judge/', 'ralph/'];
 
-const SCRIPTS = { test: 'node --test "bin/**/*.test.js"' };
+const SCRIPTS = { test: 'node --test "bin/**/*.test.js" "doctor/**/*.test.js"' };
 
 test('accepts files field of the repository package.json', () => {
   assert.deepEqual(checkRepository(path.resolve(__dirname, '..', '..')), []);
@@ -22,7 +22,7 @@ test('rejects files entry under .claude or .factory', () => {
 });
 
 test('rejects files field missing a package directory', () => {
-  for (const dir of ['bin', 'skills', 'agents', 'hooks', 'profile', 'verifier', 'judge', 'ralph']) {
+  for (const dir of ['bin', 'doctor', 'skills', 'agents', 'hooks', 'profile', 'verifier', 'judge', 'ralph']) {
     const files = GOOD.filter((entry) => entry !== `${dir}/`);
     const errors = checkPackageLayout({ files, scripts: SCRIPTS });
     assert.equal(errors.length, 1, dir);
@@ -54,8 +54,8 @@ test('ralph controller modules ship with their runtime dependency', () => {
 });
 
 test('requires setup payload and automated checks', () => {
-  const pkg = { files: GOOD, scripts: { test: 'node --test "bin/**/*.test.js" "ralph/**/*.test.js"' } };
-  const tsconfig = { include: ['bin/**/*.js', 'ralph/**/*.js'] };
+  const pkg = { files: GOOD, scripts: { test: 'node --test "bin/**/*.test.js" "doctor/**/*.test.js" "ralph/**/*.test.js"' } };
+  const tsconfig = { include: ['bin/**/*.js', 'doctor/**/*.js', 'ralph/**/*.js'] };
   assert.deepEqual(checkPackageLayout(pkg, tsconfig), []);
 
   const withoutBin = checkPackageLayout({ ...pkg, files: GOOD.filter((entry) => entry !== 'bin/') }, tsconfig);
@@ -63,10 +63,16 @@ test('requires setup payload and automated checks', () => {
   assert.ok(withoutBin[0].includes('"bin/"'), withoutBin[0]);
 
   const withoutTests = checkPackageLayout({ ...pkg, scripts: { test: 'node --test "ralph/**/*.test.js"' } }, tsconfig);
-  assert.equal(withoutTests.length, 1);
+  assert.equal(withoutTests.length, 2);
   assert.ok(withoutTests[0].includes('bin/**/*.test.js'), withoutTests[0]);
+  assert.ok(withoutTests[1].includes('doctor/**/*.test.js'), withoutTests[1]);
 
   const withoutTypecheck = checkPackageLayout(pkg, { include: ['ralph/**/*.js'] });
-  assert.equal(withoutTypecheck.length, 1);
+  assert.equal(withoutTypecheck.length, 2);
   assert.ok(withoutTypecheck[0].includes('bin/**/*.js'), withoutTypecheck[0]);
+  assert.ok(withoutTypecheck[1].includes('doctor/**/*.js'), withoutTypecheck[1]);
+
+  const withoutDoctor = checkPackageLayout({ ...pkg, files: GOOD.filter((entry) => entry !== 'doctor/') }, tsconfig);
+  assert.equal(withoutDoctor.length, 1);
+  assert.ok(withoutDoctor[0].includes('"doctor/"'), withoutDoctor[0]);
 });

@@ -15,7 +15,7 @@ adds the settings below to its `.claude/settings.json`.
 ## Settings
 
 Copy this into the project's `.claude/settings.json` (merge with existing `hooks` entries). It has
-six entries for the five hooks.
+six entries for the five hooks, described once in `entries.js` (used by `factory doctor` and checked against this JSON by `settings-entry.test.js`).
 
 ```json
 {

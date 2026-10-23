@@ -323,8 +323,9 @@ const ownedCopyProblem = (root, destination, isDirectory) => {
 
 // --- plan and apply ---
 
-const buildPlan = ({ root, packageRoot }) => {
-  const profile = loadProfile(root);
+// The checked plan without writing: the copies wanted, the retired ones, the listed ones and every
+// problem found. `factory doctor` reads this; only `buildPlan` turns problems into a stop.
+const inspectPlan = ({ root, packageRoot, profile = loadProfile(root) }) => {
   const wanted = buildWanted({ packageRoot, profile });
   const listed = readManifest(root);
 
@@ -358,6 +359,11 @@ const buildPlan = ({ root, packageRoot }) => {
   const required = wanted.map((item) => ({ destination: item.destination, isDirectory: item.kind === 'skill' }));
   required.push({ destination: MANIFEST_PATH, isDirectory: false });
   problems.push(...gitIgnoreProblems(root, required));
+  return { wanted, retired, listed, problems };
+};
+
+const buildPlan = ({ root, packageRoot }) => {
+  const { wanted, retired, listed, problems } = inspectPlan({ root, packageRoot });
   if (problems.length > 0) throw new SetupError(`setup stopped before any change:\n- ${problems.join('\n- ')}`);
   return { wanted, retired, listed };
 };
@@ -430,4 +436,4 @@ const main = (argv = process.argv.slice(2), env = process.env) => {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { runSetup, main, parseArgs, SetupError, MANIFEST_PATH };
+module.exports = { runSetup, inspectPlan, main, parseArgs, SetupError, MANIFEST_PATH, runGit, realPath };

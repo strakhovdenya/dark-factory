@@ -3,11 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "description": "AI software factory: Ralph, Acceptance Verifier, Claude Code skills, agents and hooks",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strakhovdenya/dark-factory.git"
+  },
   "bin": {
-    "dark-factory-setup": "bin/setup.js"
+    "dark-factory-setup": "bin/setup.js",
+    "factory": "bin/doctor.js"
   },
   "files": [
     "bin/",
+    "doctor/",
     "skills/",
     "agents/",
     "hooks/",
@@ -20,7 +26,7 @@
     "postinstall": "node bin/setup.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"*.test.js\" \"bin/**/*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"ralph/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\" \"test/installed-ralph.test.js\"",
+    "test": "node --test \"*.test.js\" \"bin/**/*.test.js\" \"doctor/**/*.test.js\" \"skills/**/*.test.js\" \"agents/**/*.test.js\" \"hooks/**/*.test.js\" \"profile/**/*.test.js\" \"verifier/**/*.test.js\" \"judge/**/*.test.js\" \"ralph/**/*.test.js\" \"examples/**/*.test.js\" \".claude/**/*.test.js\" \"test/installed-ralph.test.js\"",
     "prepare:ralph:sandbox": "node test/integration/prepare-ralph-sandbox.js",
     "test:ralph:sandbox": "node test/integration/run-ralph-sandbox.js"
   },

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 // Directories whose contents ship to projects. Adding a package directory is a deliberate layout change.
-const PACKAGE_DIRS = ['bin', 'skills', 'agents', 'hooks', 'profile', 'verifier', 'judge', 'ralph'];
+const PACKAGE_DIRS = ['bin', 'skills', 'agents', 'hooks', 'doctor', 'profile', 'verifier', 'judge', 'ralph'];
 // Development-only directories that must never be published.
 const FORBIDDEN_PREFIXES = ['.claude', '.factory'];
 
@@ -13,7 +13,7 @@ function normalizeEntry(entry) {
 }
 
 // Package directories whose tests and type checks the root scripts must cover explicitly.
-const CHECKED_DIRS = ['bin'];
+const CHECKED_DIRS = ['bin', 'doctor'];
 
 /**
  * Returns a list of error messages for the `files` field of a package.json object and, when given,

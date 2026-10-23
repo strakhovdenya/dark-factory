@@ -10,7 +10,7 @@ const path = require('node:path');
 const baseSet = require('../../skills/base-set.json');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const PACKAGE_ENTRIES = ['bin', 'skills', 'agents', 'hooks', 'profile', 'verifier', 'judge', 'ralph', 'package.json'];
+const PACKAGE_ENTRIES = ['bin', 'doctor', 'skills', 'agents', 'hooks', 'profile', 'verifier', 'judge', 'ralph', 'package.json'];
 // Real child_process functions, taken before a test replaces them at the process boundary.
 const realSpawnSync = childProcess.spawnSync;
 
