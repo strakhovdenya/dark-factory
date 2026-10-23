@@ -2,9 +2,9 @@
 
 How to add one more optional field to something the factory already has, without breaking the projects that do not use it. The example followed from end to end is `ralph.stepBudgets`, which **already exists**: this guide explains how it is built and does not add or change any setting.
 
-**Scope.** A *setting* is a new field of a mechanism that exists: a budget, a path, a command, a name in the profile or in a trusted config. A *new element* (a new Ralph step, verifier check, hook or skill) is a different job with its own rules: follow "Adding a new factory element" in [CLAUDE.md](../CLAUDE.md) and the issue #26 that defines the rules for new elements. This guide does not replace them and there is no separate "adding an element" document to link to.
+**Scope.** A *setting* is a new field of a mechanism that exists: a budget, a path, a command, a name in the profile or in a trusted config. A *new element* (a new Ralph step, verifier check, doctor check, hook or skill) is a different job with its own rules: follow [adding-an-element.md](adding-an-element.md). This guide does not replace it.
 
-Related: [connecting-a-project.md](connecting-a-project.md), [upgrading.md](upgrading.md).
+Related: [adding-an-element.md](adding-an-element.md), [connecting-a-project.md](connecting-a-project.md), [upgrading.md](upgrading.md).
 
 ## The example: `ralph.stepBudgets`
 
@@ -49,7 +49,7 @@ Two layers decide: the schema (type, range, unknown fields) in `loadProfile`, an
 5. **A setting never turns a capability on by itself.** A budget for a review that is not in `enabledSteps` is valid and enables nothing. A new capability is **off by default**, named by its own switch or list.
 6. **Examples and fixtures.** Show the field in an example profile if projects will copy it. Fixtures and examples are formats, not ready connections.
 7. **Tests on both fixture profiles**, "monorepo" and "single package": a positive case, the absent case (old behaviour unchanged), and error or boundary cases (below the minimum, wrong type, unknown key). No test may depend on the layout of one project, use the network, Docker or a real model; they must pass on Windows and Linux (`npm test`).
-8. **If the setting can change the verifier verdict**, run the reference PR set (cases with an expected verifier verdict) and confirm that no verdict changes unexpectedly; this is the requirement of "Adding a new factory element" in [CLAUDE.md](../CLAUDE.md). `ralph.stepBudgets` does not touch the verifier verdict, so it needs no such run. Running the reference set is part of the task that adds a setting, not of writing this guide.
+8. **If the setting can change the verifier verdict**, run the reference PR set (cases with an expected verifier verdict) and confirm that no verdict changes unexpectedly; this is the requirement of [adding-an-element.md](adding-an-element.md#5-verdict-impact-three-different-checks). `ralph.stepBudgets` does not touch the verifier verdict, so it needs no such run. Running the reference set is part of the task that adds a setting, not of writing this guide.
 9. **CHANGELOG.** Add an entry: the field, where it is read, the default (what absent means).
 10. **Merge, then release.** Like any change, it reaches projects only with a new release tag (see [CLAUDE.md](../CLAUDE.md), Release cycle).
 
@@ -89,4 +89,4 @@ So a project can add `stepBudgets` for a step it does not run, and nothing chang
 
 ## When it is not a setting
 
-A new Ralph step, verifier check, hook or skill needs registration, its own off-by-default knob, tests on two fixture profiles, the reference PR set when it can influence the verdict, and a CHANGELOG entry. Those steps are in [CLAUDE.md](../CLAUDE.md) under "Adding a new factory element", and #26 owns the rules for new elements. How the factory installs its own release (#27) and the live confirmation of Claude runs (#48) are other work: this guide does not depend on either.
+A new Ralph step, verifier check, doctor check, hook or skill is registered in the place its kind owns, stays off until a project enables it, and has its own tests, verdict-impact assessment and CHANGELOG entry. The whole procedure, including how each kind is enabled and delivered, is in [adding-an-element.md](adding-an-element.md). How the factory installs its own release (#27) and the live confirmation of Claude runs (#48) are other work: this guide does not depend on either.
