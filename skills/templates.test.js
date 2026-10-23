@@ -27,13 +27,12 @@ const PRD_HEADINGS = [
   'Предполагаемое дробление на подзадачи (только если это эпик)',
 ];
 const PRD_META = ['**Дата**', '**Статус**: Draft', '**Затрагиваемая часть проекта**', '**Связанный issue/backlog-пункт**'];
-const PROJECT_SECTIONS = [
-  'Влияние на конечный автомат',
-  'Влияние на модель данных',
-  'API-поверхность',
-  'Влияние на данные и схему Supabase',
-  'Влияние на UI',
-];
+// The five project sections of the example overlays must not be part of the shared base.
+const EXAMPLES_DIR = path.join(REPO_ROOT, 'examples', 'profiles');
+const PROJECT_SECTIONS = fs.readdirSync(EXAMPLES_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).flatMap((entry) => {
+  const file = path.join(EXAMPLES_DIR, entry.name, '.factory', 'overlays', 'prd.json');
+  return JSON.parse(fs.readFileSync(file, 'utf8')).sections.map((section) => section.title);
+});
 
 const headings = (markdown, level = '## ') =>
   markdown
@@ -112,6 +111,7 @@ test('no overlay yields base template', (t) => {
       const plan = buildTemplate('plan', root);
       assert.deepEqual(headings(plan), ['Фазы реализации'], fixture);
       for (const field of ['**Цель:**', '**Затрагивает:**', '**Задачи:**', '**Когда готова:**']) assert.ok(plan.includes(field), field);
+      assert.equal(PROJECT_SECTIONS.length, 5);
       for (const text of [prd, plan]) {
         for (const title of PROJECT_SECTIONS) assert.ok(!text.includes(title), `${fixture}: ${title}`);
       }
