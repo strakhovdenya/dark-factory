@@ -4,8 +4,8 @@ const path = require('node:path');
 const baseSet = require('../skills/base-set.json');
 const { extractAffectsPatterns } = require('../verifier/affects-scope');
 
-// The one "path to skills" table of the factory. The skill gate hook and Ralph both call
-// requiredSkillsFor; neither keeps a skill list of its own. The table is the base entries
+// The one "path to skills" table of the factory. The skill gate hook (requiredSkillDetailsFor) and
+// Ralph (requiredSkillsFor) both use it; neither keeps a skill list of its own. The table is the base entries
 // below plus the project's skillRules; a profile can add entries but cannot remove or weaken
 // a base one.
 const BASE_SKILLS = Object.freeze([...baseSet.requiredJsSkills]);
@@ -94,8 +94,8 @@ const matchesEntry = (mention, entry) => {
 };
 
 /**
- * @typedef {{ path?: string, extensions?: readonly string[], file?: string, skills: readonly string[] }} Entry
- * A path entry (path + extensions) or an exact-file entry (file).
+ * @typedef {{ path?: string, extensions?: readonly string[], file?: string, label?: string, skills: readonly string[] }} Entry
+ * A path entry (path + extensions) or an exact-file entry (file); only profile entries carry a label.
  */
 
 const isStringArray = (value) =>
@@ -108,7 +108,7 @@ const baseEntries = (profile) => {
   const adr = profile.docs?.adr;
   if (adr === undefined) return entries;
   if (typeof adr !== 'string') {
-    throw new TypeError('requiredSkillsFor: profile.docs.adr must be a string');
+    throw new TypeError('skill rules: profile.docs.adr must be a string');
   }
   // docs.adr names one file: a trailing separator (a directory) adds no rule
   const adrPath = TRAILING_SEPARATOR.test(adr) ? null : normalizePath(adr);
@@ -120,33 +120,35 @@ const baseEntries = (profile) => {
 const profileEntries = (profile) => {
   const rules = profile.skillRules ?? [];
   if (!Array.isArray(rules)) {
-    throw new TypeError('requiredSkillsFor: profile.skillRules must be an array');
+    throw new TypeError('skill rules: profile.skillRules must be an array');
   }
   return rules.map((rule, index) => {
     const entryPath = typeof rule?.path === 'string' ? normalizePath(rule.path) : null;
     const isValid =
       entryPath !== null && isStringArray(rule.extensions) && isStringArray(rule.skills);
     // fail closed: an entry that cannot be applied must not silently drop its skills
-    if (!isValid) throw new TypeError(`requiredSkillsFor: invalid profile.skillRules[${index}]`);
-    return { path: entryPath, extensions: rule.extensions, skills: rule.skills };
+    if (!isValid) throw new TypeError(`skill rules: invalid profile.skillRules[${index}]`);
+    const label = typeof rule.label === 'string' && rule.label !== '' ? rule.label : undefined;
+    return { path: entryPath, extensions: rule.extensions, label, skills: rule.skills };
   });
 };
 
 /**
- * Skills that must be loaded before the described files are edited.
+ * Skills that must be loaded before the described files are edited, with the labels of the
+ * profile entries that matched (for the hook message).
  * A string is an issue body: only the paths of its Affects section count. An array is a list of
  * explicit paths. Both forms use the same table: the base entries (JS/TS files require the base
  * metaskills; the profile's `docs.adr` file requires `adr`), then the profile's `skillRules`.
  * A directory mention includes its possible extensions conservatively; a file is filtered by
  * the entry's extensions, compound ones (".test.ts") as file name suffixes. Result: unique
- * names, base entries first.
+ * skill names, base entries first; unique labels of the matched profile entries in profile order.
  * @param {object} profile a loaded, valid profile
  * @param {string|string[]} textOrPaths
- * @returns {string[]}
+ * @returns {{ skills: string[], labels: string[] }}
  */
-const requiredSkillsFor = (profile, textOrPaths) => {
+const requiredSkillDetailsFor = (profile, textOrPaths) => {
   if (profile === null || typeof profile !== 'object') {
-    throw new TypeError('requiredSkillsFor: profile must be a loaded profile object');
+    throw new TypeError('skill rules: profile must be a loaded profile object');
   }
   let mentions;
   if (typeof textOrPaths === 'string') {
@@ -154,18 +156,30 @@ const requiredSkillsFor = (profile, textOrPaths) => {
   } else if (Array.isArray(textOrPaths) && textOrPaths.every((v) => typeof v === 'string')) {
     mentions = textOrPaths.map(mentionFromExplicitPath);
   } else {
-    throw new TypeError('requiredSkillsFor: expected an issue body (string) or an array of path strings');
+    throw new TypeError('skill rules: expected an issue body (string) or an array of path strings');
   }
   const found = mentions.filter((mention) => mention !== null);
 
   const skills = new Set();
+  const labels = new Set();
   for (const entry of [...baseEntries(profile), ...profileEntries(profile)]) {
     const isHit = found.some((mention) =>
       entry.file === undefined ? matchesEntry(mention, entry) : mention.exact === entry.file,
     );
-    if (isHit) for (const skill of entry.skills) skills.add(skill);
+    if (!isHit) continue;
+    for (const skill of entry.skills) skills.add(skill);
+    if (entry.label !== undefined) labels.add(entry.label);
   }
-  return [...skills];
+  return { skills: [...skills], labels: [...labels] };
 };
 
-module.exports = { BASE_SKILLS, BASE_EXTENSIONS, requiredSkillsFor };
+/**
+ * Skills that must be loaded before the described files are edited: the `skills` of
+ * requiredSkillDetailsFor (same table, same order).
+ * @param {object} profile a loaded, valid profile
+ * @param {string|string[]} textOrPaths
+ * @returns {string[]}
+ */
+const requiredSkillsFor = (profile, textOrPaths) => requiredSkillDetailsFor(profile, textOrPaths).skills;
+
+module.exports = { BASE_SKILLS, BASE_EXTENSIONS, requiredSkillsFor, requiredSkillDetailsFor };
