@@ -1,250 +1,287 @@
 ---
 name: issues
-description: Создаёт GitHub issues и milestones из файла плана (в каталоге docs.plans профиля проекта), а также задаёт формат и правила проверяемости для любой одиночной issue, создаваемой вручную через gh issue create. Использую, когда есть готовый план с фазами, и ОБЯЗАТЕЛЬНО перед созданием или правкой тела любой issue.
+description: Creates GitHub issues and milestones from a plan file (in the profile's docs.plans directory) and sets the format and verifiability rules for any single issue created by hand through gh issue create. Use when there is a ready plan with phases, and ALWAYS before creating or editing the body of any issue.
 ---
 
 # Issues Generator
 
-Прочитай план из файла: $ARGUMENTS
+Read the plan from the file: $ARGUMENTS
 
-Если `$ARGUMENTS` не указан — спроси у пользователя путь к файлу плана
-(`PLAN-<kebab-name>.md` в каталоге `docs.plans` из `.factory/profile.json`), не выдумывай его.
-Если файл не найден — сообщи об этом и останови выполнение.
+If `$ARGUMENTS` is not given, ask the user for the path to the plan file
+(`PLAN-<kebab-name>.md` in the `docs.plans` directory of `.factory/profile.json`); do not make it up.
+If the file is not found, report it and stop.
 
-Для каждой фазы плана создай milestone, а для каждой задачи внутри фазы — Issue в GitHub,
-используя `gh` CLI. Каждый созданный issue также добавляется в GitHub Project репозитория
-(`gh project item-add`) — единая доска для всех эпиков, не только текущего.
+For every phase of the plan create a milestone, and for every task inside the phase create a GitHub
+Issue with the `gh` CLI. Every created issue is also added to the repository's GitHub Project
+(`gh project item-add`) — one board for all epics, not only the current one.
 
-Эти GitHub issues — **источник правды для создания и выполнения тасок** (заменяют любой
-старый файловый бэклог или доску задач). Они не запускают
-реализацию сами по себе — старт работы над конкретным issue всё равно идёт через обычный
-Plan-first / Issue-first / Branch-first protocol из скилла `task-lifecycle` (Issue-first здесь уже
-выполнен самим фактом существования issue с полным телом — см. "Формат Issue" ниже).
+These GitHub issues are the **source of truth for creating and executing tasks** (they replace any
+old file backlog or task board). They do not start implementation by themselves — work on a
+specific issue still goes through the usual Plan-first / Issue-first / Branch-first protocol of
+the `task-lifecycle` skill (Issue-first is already satisfied here by the very existence of an issue
+with a full body — see "Issue format" below).
 
-Этот скил — не единственный способ завести issue: для одиночной задачи вне эпика (нет
-PRD/плана) issue создаётся тем же форматом Body напрямую через `gh issue create`, без плана —
-план/milestone нужны только когда несколько задач объединены в фазы эпика. В этом случае
-источником для `Docs to Read`/`Key Invariants`/`Affects` становится не PRD (его нет), а прямое
-чтение затронутого кода — раздел "Сверка с реальным кодом" ниже применяется тем более строго, раз
-нет PRD-подложки, которая могла бы дать эти поля готовыми.
+This skill is not the only way to file an issue: for a single task outside an epic (no PRD/plan)
+the issue is created with the same Body format directly through `gh issue create`, without a plan —
+a plan/milestone is needed only when several tasks are grouped into the phases of an epic. In that
+case the source for `Docs to Read`/`Key Invariants`/`Affects` is not a PRD (there is none) but a
+direct reading of the affected code — the "Checking against the real code" section below applies
+all the more strictly, since there is no PRD backing to provide these fields ready-made.
 
-**Загрузи этот скилл перед любым `gh issue create` и перед правкой тела issue `gh issue edit`,
-даже для одиночной задачи без плана.** Формат и правила проверяемости ниже нужны именно ей: ad-hoc
-issue без плана чаще всего и получает пункты, которые верификатор не может проверить, и
-красит отчёт в `UNVERIFIABLE`.
+**Load this skill before any `gh issue create` and before editing an issue body with `gh issue
+edit`, even for a single task without a plan.** The format and the verifiability rules below are
+needed exactly for it: an ad-hoc issue without a plan most often gets items that the verifier
+cannot check, and turns the report `UNVERIFIABLE`.
 
-## Перед созданием — проект и проверка на дубли
+## Before creating — the project and the duplicate check
 
-- Найди GitHub Project репозитория: номер задан полем `githubProject` в `.factory/profile.json`
-  (проверь его через `gh project list --owner :owner`). Используй этот Project — не создавай новый
-  Project без явного запроса пользователя. Если в профиле номера нет, а `gh project list` для
-  владельца репозитория вернул пустой список (Project отсутствует или ещё не привязан) — сообщи об
-  этом пользователю и спроси, создать ли новый (`gh project create
-  --owner :owner --title "..."` + `gh project link <number> --owner :owner --repo :owner/:repo`),
-  прежде чем продолжать.
-- `gh` не даёт создавать issues автоматически идемпотентно — при повторном запуске скила на том
-  же плане нужно самому не создавать дубли:
-  - `gh api repos/:owner/:repo/milestones --paginate` — проверь, нет ли уже milestone с таким же
-    заголовком (`EPIC-NN · Фаза N: название`) прежде чем создавать новый.
-  - `gh issue list --search "in:title <текст задачи>" --state all` — проверь, нет ли уже issue с
-    таким же заголовком (в рамках соответствующего milestone) прежде чем создавать новый. Если
-    issue уже существует, но ещё не добавлен в Project — всё равно выполни для него шаг
-    добавления в Project (шаг 5), не пропускай его вместе с созданием issue.
+- Find the repository's GitHub Project: its number is set by the `githubProject` field of
+  `.factory/profile.json` (check it with `gh project list --owner :owner`). Use that Project; do not
+  create a new Project without an explicit request from the user. If the profile has no number and
+  `gh project list` for the repository owner returned an empty list (no Project exists or it is not
+  linked yet), tell the user and ask whether to create a new one (`gh project create
+  --owner :owner --title "..."` + `gh project link <number> --owner :owner --repo :owner/:repo`)
+  before continuing.
+- `gh` does not create issues idempotently — when the skill is run again on the same plan, avoid
+  creating duplicates yourself:
+  - `gh api repos/:owner/:repo/milestones --paginate` — check whether a milestone for the same phase
+    of the same epic already exists before creating a new one. Match by **epic identifier and phase
+    number**, not by the whole title: take the titles of the existing milestones and look for
+    `<epic id> · Phase <N>` or `<epic id> · Фаза <N>` (the earlier milestones were created with
+    the Russian word `Фаза`; both words mean the same phase). The text after the number may
+    differ. A milestone of another epic, or of the same epic with another phase number, is not a
+    match. The epic identifier is the one found in step 1 below (`EPIC-NN`, or the kebab name taken
+    from the plan file name). A milestone that is found is reused as it is: do not rename it, do
+    not change its description, and attach the issues to its existing title.
+  - `gh issue list --search "in:title <task text>" --state all` — check whether an issue with the
+    same title already exists (within the corresponding milestone) before creating a new one. If
+    the issue already exists but is not yet on the Project, still perform the Project step for it
+    (step 6); do not skip it together with the issue creation.
 
-Если что-то уже существует — пропусти создание и сообщи об этом в итоговой сводке, не создавай
-дубль и не спрашивай пользователя по каждому отдельному совпадению.
+If something already exists, skip its creation and report it in the final summary; do not create a
+duplicate and do not ask the user about every single match.
 
-## Порядок действий
+## Procedure
 
-1. Прочитай файл плана целиком (все секции `### Фаза N: ...`), а также PRD, на который план
-   ссылается в шапке (`**PRD:** ...`) — целиком, не только заголовки. Issue Body (см. "Формат
-   Issue" ниже) требует полей (`Docs to Read`, `Key Invariants`, `Test Requirement`), которых нет
-   в самом плане — они берутся из PRD (`## Docs to Read`/эквивалент, `## Ключевые инварианты`,
-   `## Test Requirement`), не выдумываются. `## Контекст` собирается из разделов PRD `## Цель`,
-   `## Контекст и согласованность с проектом` и `## Не в скоупе` (см. "Контекст: зачем, а не
-   только что" ниже). Также найди идентификатор эпика — обычно в H1 плана
-   (`# Plan: ... (EPIC-NN / Phase MM)`) или PRD; если явного `EPIC-NN` нет, используй короткое
-   kebab-имя фичи из имени файла плана (`PLAN-<kebab-name>.md`) как идентификатор.
-2. Для каждой фазы создай milestone, **с префиксом эпика в заголовке** — без этого при нескольких
-   параллельных эпиках разные milestones «Фаза 1: …» неразличимы:
+1. Read the whole plan file (all `### Phase N: ...` sections), and also the PRD that the plan
+   refers to in its header (`**PRD:** ...`) — whole, not only the headings. The Issue Body (see
+   "Issue format" below) requires fields (`Docs to Read`, `Key Invariants`, `Test Requirement`)
+   that are not in the plan itself — they are taken from the PRD (`## Docs to Read`/equivalent,
+   `## Key Invariants`, `## Test Requirement`), not invented. `## Context` is assembled from the
+   PRD sections `## Goal`, `## Context and Project Alignment` and `## Out of Scope` (see "Context:
+   why, not only what" below).
+   Read both name sets: new PRDs and plans use the English names above, while earlier documents
+   use the Russian ones. In a PRD: `Goal`/`Цель`, `Context and Project Alignment`/`Контекст и
+   согласованность с проектом`, `Out of Scope`/`Не в скоупе`, `Key Invariants`/`Ключевые
+   инварианты`, `Test Requirement (Sketch)`/`Test Requirement (набросок)`, `Acceptance
+   Criteria`/`Критерии готовности (Acceptance Criteria)`. In a plan: phase headings `### Phase N:
+   ...`/`### Фаза N: ...` and the labels `Goal:`/`Цель:`, `Affects:`/`Затрагивает:`,
+   `Tasks:`/`Задачи:` (the checklist `- [ ] ...` under it), `Done when:`/`Когда готова:`. Also find
+   the epic identifier — usually in the H1 of the plan (`# Plan: ... (EPIC-NN / Phase MM)`) or the
+   PRD; if there is no explicit `EPIC-NN`, use the short kebab name of the feature from the plan
+   file name (`PLAN-<kebab-name>.md`) as the identifier.
+2. For every phase create a milestone, **with the epic prefix in the title** (unless the duplicate
+   check above found one for this epic and phase — then reuse it); without the prefix, with
+   several parallel epics, different milestones "Phase 1: …" are indistinguishable:
    ```
-   gh api repos/:owner/:repo/milestones -f title="EPIC-NN · Фаза N: название" -f description="Цель фазы (из '**Цель:**' плана)"
+   gh api repos/:owner/:repo/milestones -f title="EPIC-NN · Phase N: name" -f description="Phase goal (from the plan's '**Goal:**')"
    ```
-   (если эпик не имеет номера — `<kebab-name> · Фаза N: название`).
-3. Для каждой задачи (строка `- [ ] ...` под `**Задачи:**`) внутри фазы — **перед тем как
-   зафиксировать текст её issue** — выполни три обязательных шага (разные задачи одной фазы обычно
-   затрагивают разные файлы и разные решения, так что все шаги делаются отдельно для каждой
-   задачи, не один раз на всю фазу):
-   - сверь файлы, которые попадут в её `Affects`, с реальным кодом, не полагаясь только на текст
-     плана/PRD (см. "Сверка с реальным кодом" ниже);
-   - проверь архитектурное влияние задачи и переведи существенный результат в конкретный `INV-n`
-     (см. "Архитектурное влияние" ниже);
-   - если эта сверка или разбор задачи выявили развилку реализации (два и более валидных способа) —
-     спроси пользователя, какой вариант выбрать, и зафиксируй ответ в `Key Invariants` (см.
-     "Развилки реализации" ниже) — не переноси открытую развилку в issue.
-4. Составь черновик тела issue по правилам раздела "Формат Issue" ниже. Прежде чем зафиксировать
-   его как финальный, запусти агента `research` с брифом из раздела
-   "Ревью черновика issue независимым агентом" ниже, передав ему **весь текст черновика тела** и
-   путь `node_modules/dark-factory/verifier/issue-contract.md` — не историю текущей сессии и не текст плана/PRD.
-   Каждое возвращённое замечание либо исправь в черновике, либо явно зафиксируй в `Key Invariants`
-   причину, по которой оно отклоняется — до перехода к следующему шагу.
-5. Создай Issue для этой задачи, привязанный к её milestone:
+   (if the epic has no number — `<kebab-name> · Phase N: name`).
+3. For every task (a line `- [ ] ...` under `**Tasks:**`) inside the phase — **before fixing the
+   text of its issue** — perform three mandatory steps (different tasks of one phase usually touch
+   different files and different decisions, so all steps are done separately for each task, not
+   once for the whole phase):
+   - check the files that will go into its `Affects` against the real code, without relying only on
+     the plan/PRD text (see "Checking against the real code" below);
+   - check the architectural impact of the task and turn a significant result into a concrete
+     `INV-n` (see "Architectural impact" below);
+   - if this check or the analysis of the task revealed an implementation fork (two or more valid
+     ways) — ask the user which variant to choose, and record the answer in `Key Invariants` (see
+     "Implementation forks" below); do not carry an open fork into the issue.
+4. Compose a draft of the issue body by the rules of the "Issue format" section below. Before
+   fixing it as final, run the `research` agent with the brief from the section "Independent
+   review of the issue draft" below, giving it **the whole text of the body draft** and the path
+   `node_modules/dark-factory/verifier/issue-contract.md` — not the history of the current
+   session and not the text of the plan/PRD. Each returned remark must either be fixed in the
+   draft or be explicitly recorded in `Key Invariants` with the reason why it is rejected — before
+   moving to the next step.
+5. Create the Issue for this task, attached to its milestone:
    ```
-   gh issue create --title "..." --body "..." --label "..." --milestone "EPIC-NN · Фаза N: название"
+   gh issue create --title "..." --body "..." --label "..." --milestone "EPIC-NN · Phase N: name"
    ```
-6. Добавь только что созданный (или найденный существующий) issue в GitHub Project (номер найден
-   на шаге "Перед созданием"):
+   (for a reused milestone, pass its existing title exactly as it is on GitHub).
+6. Add the just created (or the found existing) issue to the GitHub Project (the number found in
+   the "Before creating" step):
    ```
    gh project item-add <project-number> --owner :owner --url <issue-url>
    ```
-   (`gh issue create` выводит URL созданного issue — используй его напрямую, не собирай вручную.)
-7. После создания всех issues выведи пользователю сводку: сколько milestones/issues создано,
-   сколько добавлено в Project, сколько пропущено как дубли, ссылки на созданные issues
-   (`gh issue create` возвращает URL).
+   (`gh issue create` prints the URL of the created issue — use it directly, do not assemble it by
+   hand.)
+7. After all issues are created, show the user a summary: how many milestones/issues were created,
+   how many were added to the Project, how many were skipped as duplicates, links to the created
+   issues (`gh issue create` returns the URL).
 
-## Сверка с реальным кодом (обязательна перед фиксацией текста issue)
+## Checking against the real code (mandatory before fixing the issue text)
 
-План и PRD пишутся *до* погружения в детали реализации — они не могут знать про расхождения,
-которые видны только в самом коде (например: запрос к данным не тянет нужное поле, существующий
-spec-файл мокает данные в форме, несовместимой с тем, что потребует задача, или в кодовой базе уже
-есть хелпер/паттерн, который надо переиспользовать, а не дублировать в нескольких местах). Поэтому,
-прежде чем писать финальный текст `Affects`/`Docs to Read`/`Key Invariants`:
+The plan and the PRD are written *before* diving into implementation details — they cannot know
+about discrepancies visible only in the code itself (for example: a data query does not fetch the
+needed field, an existing spec file mocks data in a shape incompatible with what the task will
+need, or the code base already has a helper/pattern that must be reused rather than duplicated in
+several places). Therefore, before writing the final text of `Affects`/`Docs to Read`/`Key
+Invariants`:
 
-- Открой и прочитай (не по памяти о плане/PRD, а фактически) каждый файл, который попадёт в
-  `Affects` — не только те несколько строк, которые процитированы в плане.
-- Проверь, что упомянутые номера строк/сигнатуры функций всё ещё актуальны — план/PRD могли быть
-  написаны раньше последних изменений кода.
-- Явно выпиши в `Affects`/`Key Invariants` любые найденные расхождения между "как задокументировано
-  в плане/PRD" и "как есть в коде на самом деле" — не подгоняй Body issue под ожидания плана молча.
-- Если в затронутом коде уже есть готовый паттерн/хелпер для того, что требует задача (например,
-  соседний сервис уже строит похожее значение похожим образом) — укажи его прямо в `Affects`, чтобы
-  исполнитель переиспользовал его, а не изобретал второй способ рядом.
+- Open and read (not from memory of the plan/PRD, but actually) every file that will go into
+  `Affects` — not only the few lines quoted in the plan.
+- Check that the mentioned line numbers/function signatures are still current — the plan/PRD may
+  have been written before the latest code changes.
+- Write explicitly into `Affects`/`Key Invariants` any discrepancies found between "as documented
+  in the plan/PRD" and "as it actually is in the code" — do not silently fit the issue Body to the
+  expectations of the plan.
+- If the affected code already has a ready pattern/helper for what the task requires (for example,
+  a neighbouring service already builds a similar value in a similar way) — name it directly in
+  `Affects`, so that the executor reuses it instead of inventing a second way next to it.
 
-## Архитектурное влияние (обязательно для каждой задачи)
+## Architectural impact (mandatory for every task)
 
-Принцип — низкая связанность: поведение меняется за существующей границей, а не правками потребителей (проверь правила проекта из `ruleFiles` профиля). По прочитанному коду
-ответь для задачи:
+The principle is low coupling: behavior changes behind an existing boundary, not by editing
+consumers (check the project rules from the profile's `ruleFiles`). From the code you have read,
+answer for the task:
 
-1. Какой существующей границе (модуль, сервис, контракт) принадлежит поведение, которое задача
-   добавляет или меняет? Если PRD назвал точку вариативности — это она.
-2. Появляется ли новая зависимость между модулями, или задача укладывается в существующий
-   публичный контракт?
-3. Если задача вводит новую абстракцию — реальна ли точка вариативности (вторая реализация сейчас
-   или уже запланирована), или это заготовка «на будущее»? Заготовку из задачи убери.
+1. Which existing boundary (module, service, contract) owns the behavior that the task adds or
+   changes? If the PRD named a variation point, it is that one.
+2. Does a new dependency between modules appear, or does the task fit the existing public
+   contract?
+3. If the task introduces a new abstraction — is the variation point real (a second implementation
+   now or already planned), or is it a placeholder "for the future"? Remove the placeholder from
+   the task.
 
-Существенный результат запиши в `Key Invariants` конкретным `INV-n` о границе или направлении
-зависимости, который проверяется по импортам и вызовам, например: «`INV-2` Оркестратор экспорта
-зависит только от контракта `Exporter`; конкретный рендерер он не импортирует» или «`INV-3` SDK
-провайдера импортируется только внутри модуля `ai-provider`». Размытый инвариант вида «код слабо
-связан» / «решение расширяемо» не пиши: верификатор не может его проверить. Если задача
-не затрагивает границ (правка внутри одной функции, документация) — инвариант не добавляй.
-Выбор между двумя валидными размещениями логики — это развилка, её решает пользователь (см. ниже).
+Write a significant result into `Key Invariants` as a concrete `INV-n` about a boundary or the
+direction of a dependency that can be checked by imports and calls, for example: "`INV-2` The
+export orchestrator depends only on the `Exporter` contract; it does not import a concrete
+renderer" or "`INV-3` The provider SDK is imported only inside the `ai-provider` module". Do not
+write a vague invariant such as "the code is loosely coupled" / "the solution is extensible": the
+verifier cannot check it. If the task does not touch boundaries (an edit inside one function,
+documentation), do not add an invariant. The choice between two valid placements of logic is a
+fork, and the user decides it (see below).
 
-## Развилки реализации — уточняй у пользователя заранее, не оставляй исполнителю issue
+## Implementation forks — clarify with the user in advance, do not leave them to the issue executor
 
-Если для задачи есть больше одного одинаково валидного способа реализации (два места, где можно
-разместить логику; включать ли новый общий хелпер или дублировать код; в каком порядке применять
-преобразования) — **не оставляй эту развилку в issue открытой** ("можно так или так") и не
-рассчитывай, что исполнитель сам её удачно разрешит по ходу работы.
+If for the task there is more than one equally valid way to implement it (two places where the
+logic can be put; whether to introduce a new shared helper or duplicate code; in what order to
+apply transformations) — **do not leave this fork open in the issue** ("can do it this way or
+that") and do not count on the executor resolving it well along the way.
 
-Вместо этого: **сформулируй найденную развилку и её варианты и спроси пользователя, какой выбрать**
-(`AskUserQuestion`) — не выбирай сам молча и не угадывай. Получив ответ, зафиксируй его в issue
-явной, стандартной пометкой в `Key Invariants`, например:
+Instead: **state the fork you found and its variants and ask the user which to choose**
+(`AskUserQuestion`); do not choose silently yourself and do not guess. After getting the answer,
+record it in the issue with an explicit, standard note in `Key Invariants`, for example:
 
 ```
-**Resolved decision (do not re-litigate/ask):** <выбранный вариант> — <краткая причина>.
-Отвергнутая альтернатива: <вариант> — <почему не он>.
+**Resolved decision (do not re-litigate/ask):** <chosen variant> — <short reason>.
+Rejected alternative: <variant> — <why not it>.
 ```
 
-Эта пометка сигнализирует исполнителю: вопрос уже решён с пользователем, реализовывать нужно ровно
-этот вариант, а не заново взвешивать альтернативы или останавливаться, чтобы спросить.
+This note signals to the executor: the question is already settled with the user, exactly this
+variant must be implemented, rather than weighing the alternatives again or stopping to ask.
 
-Если после сверки с реальным кодом и разбора развилок честная неопределённость всё равно остаётся
-(данных не хватает даже после чтения кода и вопроса пользователю) — не создавай issue в текущем
-виде; сначала проясни недостающее с пользователем.
+If after checking against the real code and analyzing the forks honest uncertainty still remains
+(there is not enough data even after reading the code and asking the user), do not create the
+issue in its current form; first clarify the missing part with the user.
 
-## Формат Issue
+## Issue format
 
-Единственный источник формата тела issue — `node_modules/dark-factory/verifier/issue-contract.md`
-(контракт установленной фабрики; копировать его в проект не нужно). Перед созданием или правкой
-issue прочитай этот файл и сформируй **только v2** body, который проходит линтер установленной
-фабрики: `node node_modules/dark-factory/verifier/issue-lint.js <файл> --require-v2` из корня
-проекта (в выводе не должно быть `problems`). Структуру issue проекта расширяет только `.github/verifier/issue-contract.overlay.json` (контракт и его overlay из ядра); профиль не задаёт второй overlay шаблона issue — `overlays` профиля относится только к PRD и плану.
-Не дублируй здесь перечни секций, ID-префиксов, типов или
-грамматику `Verify:`: при изменении контракта этот скил должен следовать файлу-контракту.
-Тот же файл — единственный источник правил формулировки пунктов `Acceptance Criteria`, `Definition of
-Done`, `Test Requirement` и `Key Invariants` (в том числе того, как читать перечисления через запятую);
-не копируй эти правила сюда — при сомнении в формулировке читай `node_modules/dark-factory/verifier/issue-contract.md`.
+The only source of the issue body format is `node_modules/dark-factory/verifier/issue-contract.md`
+(the contract of the installed factory; there is no need to copy it into the project). Before
+creating or editing an issue, read that file and compose **only a v2** body that passes the linter
+of the installed factory: `node node_modules/dark-factory/verifier/issue-lint.js <file> --require-v2`
+from the project root (the output must have no `problems`). The project's issue structure is
+extended only by `.github/verifier/issue-contract.overlay.json` (the contract and its overlay from
+the core); the profile does not set a second issue template overlay — the profile's `overlays`
+concerns only the PRD and the plan.
+Do not duplicate here lists of sections, ID prefixes, types or the `Verify:` grammar: when the
+contract changes, this skill must follow the contract file.
+The same file is the only source of the wording rules for the items of `Acceptance Criteria`,
+`Definition of Done`, `Test Requirement` and `Key Invariants` (including how to read
+comma-separated lists); do not copy these rules here — when in doubt about a wording, read
+`node_modules/dark-factory/verifier/issue-contract.md`.
 
-Содержимое полей по-прежнему берётся из плана/PRD и сверки с реальным кодом: `Affects` перечисляет
-весь ожидаемый diff, `Docs to Read` — конкретные источники, `Key Invariants` — применимые
-ограничения и заранее разрешённые развилки. Для ad-hoc issue без плана/PRD используй те же правила,
-но получай содержание из фактически прочитанного кода и документации.
+The content of the fields is still taken from the plan/PRD and the check against the real code:
+`Affects` lists the whole expected diff, `Docs to Read` — concrete sources, `Key Invariants` —
+the applicable constraints and forks resolved in advance. For an ad-hoc issue without a plan/PRD
+use the same rules, but take the content from the code and documentation actually read.
 
-### Правка тела issue с лейблом `spec-approved`
+### Editing the body of an issue with the `spec-approved` label
 
-Если issue уже помечен лейблом `spec-approved` (тело зафиксировано владельцем по sha256-хешу), его тело правит только владелец — исполнитель не вызывает `gh issue edit` для
-такого issue сам, даже когда правка нужна ради Acceptance Criteria (см. "4. Scope discipline
-during implementation" в скилле `task-lifecycle`): вместо этого он останавливается
-и просит владельца внести правку. После правки владельцем тела такого issue лейбл `spec-approved`
-ставится заново — иначе хеш тела разойдётся с одобренным, и верификатор вернёт FAIL "spec changed
+If the issue already has the `spec-approved` label (the body is fixed by the owner by a sha256
+hash), only the owner edits its body — the executor does not call `gh issue edit` for such an issue
+itself, even when the edit is needed for the Acceptance Criteria (see "4. Scope discipline during
+implementation" in the `task-lifecycle` skill): instead it stops and asks the owner to make the
+edit. After the owner edits the body of such an issue, the `spec-approved` label is set again —
+otherwise the body hash diverges from the approved one, and the verifier returns FAIL "spec changed
 after approval".
 
-### Контекст: зачем, а не только что
+### Context: why, not only what
 
-`## Контекст` — единственное место issue, где исполнитель (человек, Claude в новой сессии, Ralph)
-видит мотив задачи. По мотиву он решает мелкие развилки, которых нет в критериях, а владелец по нему
-быстро понимает, зачем задача нужна. Контракт требует только наличие секции и её содержание не
-проверяет, поэтому состав задаётся здесь. Контекст состоит из четырёх частей, каждая начинается с
-фиксированного зачина (по абзацу на часть):
+`## Context` is the only place of the issue where the executor (a human, Claude in a new session,
+Ralph) sees the motive of the task. From the motive they decide small forks that are not in the
+criteria, and the owner quickly understands from it why the task is needed. New issues use the
+section name `Context`; the contract still accepts the earlier Russian name `Контекст` for existing
+issues. The contract requires only the presence of the section and does not check its content, so
+the composition is set here. The context consists of four parts, each starting with a fixed
+opening (one paragraph per part):
 
-- `Проблема:` что не так сейчас, с конкретикой: место в коде, сценарий, пример, на котором это
-  видно. Не «нужно улучшить X», а что именно происходит сейчас.
-- `Почему важно:` что будет, если не сделать: кого и как затрагивает, какой риск или потерю
-  закрывает задача.
-- `После задачи:` что и как работает после изменения, описанное с точки зрения поведения
-  (пользователь, CI, агент), а не как список файлов.
-- `Граница:` что задача сознательно не делает и какие смежные задачи это берут (со ссылками
-  `#N`). Если смежного нет, так и напиши: `Граница: смежных задач нет.`
+- `Problem:` what is wrong now, concretely: the place in the code, the scenario, the example on
+  which it is visible. Not "X needs improving", but what exactly happens now.
+- `Why it matters:` what happens if it is not done: whom it affects and how, which risk or loss the
+  task closes.
+- `After the task:` what works and how after the change, described from the point of view of
+  behavior (user, CI, agent), not as a list of files.
+- `Boundary:` what the task deliberately does not do and which adjacent tasks take it (with `#N`
+  links). If there is nothing adjacent, say so: `Boundary: there are no adjacent tasks.`
 
-Источники частей:
+Existing issues use the Russian openings `Проблема:`, `Почему важно:`, `После задачи:`, `Граница:`;
+when reading or reviewing such an issue, treat them as the same four parts.
 
-- issue из плана: разделы PRD `## Цель` (→ `После задачи:`), `## Контекст и согласованность с
-  проектом` (→ `Проблема:`, `Почему важно:`) и `## Не в скоупе` (→ `Граница:`), а также текст фазы
-  плана;
-- issue без PRD: прочитанный код (где проблема видна) и запрос владельца (зачем он её поднял).
+Sources of the parts:
 
-Правила объёма:
+- an issue from a plan: the PRD sections `## Goal` (→ `After the task:`), `## Context and Project
+  Alignment` (→ `Problem:`, `Why it matters:`) and `## Out of Scope` (→ `Boundary:`), and also the
+  text of the plan phase (the earlier Russian names of these sections are read the same way);
+- an issue without a PRD: the code you read (where the problem is visible) and the owner's request
+  (why they raised it).
 
-- Контекст объясняет мотив и итог. Не пересказывай в нём `Affects`, критерии или содержимое
-  документов из `Docs to Read`: подробности давай ссылкой (путь, номер ADR, `#N`). Обычно это
-  4–10 предложений на всю секцию; раздувать issue вредно так же, как оставлять Контекст одной фразой.
-- Термины, которые исполнитель без плана не знает (имя лейбла, внутреннее название механизма),
-  поясняй при первом упоминании одной фразой.
+Size rules:
 
-Состав Контекста линтер не проверяет; его оценивает независимый ревьюер черновика (см. "Ревью
-черновика issue независимым агентом").
+- The context explains the motive and the result. Do not retell `Affects`, the criteria or the
+  content of the documents from `Docs to Read` in it: give details by a reference (path, ADR
+  number, `#N`). It is usually 4–10 sentences for the whole section; bloating an issue is as
+  harmful as leaving the context as a single phrase.
+- Explain terms that the executor does not know without the plan (a label name, an internal name of
+  a mechanism) with one phrase at the first mention.
 
-### Перевод legacy issue в v2
+The linter does not check the composition of the context; it is assessed by the independent
+reviewer of the draft (see "Independent review of the issue draft").
 
-Когда тело существующего issue переписывается из legacy-формата в v2 (например, по шагу Issue-first
-в скилле `task-lifecycle`), Контекст не переносится как есть: перепиши его по
-четырём частям выше. Сохрани все факты старого описания, а недостающие части собери из PRD/плана, на
-которые ссылается issue, из связанных issue и из кода. Если какую-то часть собрать не из чего,
-спроси владельца, а не выдумывай мотив. Перед `gh issue edit` пройди тот же путь, что и при
-создании: линтер с `--require-v2` и независимый ревьюер черновика.
+### Converting a legacy issue to v2
 
-### Пример Body
+When the body of an existing issue is rewritten from the legacy format to v2 (for example, by the
+Issue-first step in the `task-lifecycle` skill), the context is not carried over as is: rewrite it
+by the four parts above. Keep all facts of the old description, and assemble the missing parts from
+the PRD/plan the issue refers to, from related issues and from the code. If some part cannot be
+assembled from anything, ask the owner instead of inventing a motive. Before `gh issue edit` go
+the same path as at creation: the linter with `--require-v2` and the independent reviewer of the
+draft.
+
+### Body example
 
 ```markdown
-## Контекст
-Проблема: CLI экспорта (`scripts/export-name.js`) берёт имя выходного файла из аргумента как есть и пишет файл по нему. Имя вида `../x.pdf` записывает файл вне каталога экспорта.
+## Context
+Problem: the export CLI (`scripts/export-name.js`) takes the output file name from the argument as is and writes the file under it. A name like `../x.pdf` writes a file outside the export directory.
 
-Почему важно: имя приходит от пользователя, то есть это недоверенный ввод, который доходит до записи в файловую систему. Файл вне каталога экспорта может перезаписать чужие данные.
+Why it matters: the name comes from the user, so it is untrusted input that reaches a file system write. A file outside the export directory can overwrite other data.
 
-После задачи: CLI проверяет имя до записи; имя с разделителем пути или пустое отклоняется с ошибкой, и файл не создаётся. Валидные имена работают как раньше. Ограничение описано в `docs/export.md`.
+After the task: the CLI checks the name before writing; a name with a path separator, or an empty one, is rejected with an error and no file is created. Valid names work as before. The restriction is described in `docs/export.md`.
 
-Граница: формат содержимого файла и каталог экспорта не меняются; смежных задач нет.
+Boundary: the file content format and the export directory do not change; there are no adjacent tasks.
 
 ## Affects
 - `scripts/export-name.js`
@@ -252,144 +289,149 @@ after approval".
 - `docs/export.md`
 
 ## Docs to Read
-- `docs/export.md` — раздел «Имена файлов»
+- `docs/export.md` — section "File names"
 
 ## Key Invariants
-- INV-1 Проверка имени выполняется до записи выходного файла.
+- INV-1 The name is checked before the output file is written.
 
 ## Acceptance Criteria
-- [ ] AC-1 [behavior] Валидное имя принимается CLI. Verify: scripts/export-name.spec.js "accepts valid output name"
-- [ ] AC-2 [behavior] Given имя содержит разделитель пути When CLI проверяет имя Then команда завершается с ошибкой до записи файла. Verify: scripts/export-name.spec.js "rejects path separator before write"
-- [ ] AC-3 [doc] Документация описывает ограничение на имя файла. Verify: docs/export.md
+- [ ] AC-1 [behavior] A valid name is accepted by the CLI. Verify: scripts/export-name.spec.js "accepts valid output name"
+- [ ] AC-2 [behavior] Given a name contains a path separator When the CLI checks the name Then the command fails before the file is written. Verify: scripts/export-name.spec.js "rejects path separator before write"
+- [ ] AC-3 [doc] The documentation describes the file name restriction. Verify: docs/export.md
 
 ## Test Requirement
-- [ ] TR-1 [behavior] Given имя пустое When CLI проверяет имя Then команда завершается с ошибкой. Verify: scripts/export-name.spec.js "rejects empty output name"
+- [ ] TR-1 [behavior] Given an empty name When the CLI checks the name Then the command fails. Verify: scripts/export-name.spec.js "rejects empty output name"
 
 ## Definition of Done
-- [ ] DOD-1 [ci] Проверка скриптов на голове PR успешна. Verify: ci "Test (scripts)"
+- [ ] DOD-1 [ci] The scripts check on the PR head succeeds. Verify: ci "Test (scripts)"
 
 ## Dependencies
-Нет.
+None.
 ```
 
-## Ревью черновика issue независимым агентом
+## Independent review of the issue draft
 
-Этот шаг не заменяет линтер (`issue-lint.js` фабрики проверяет формат: секции, ID-префиксы,
-грамматику `Verify:`) — ревьюер проверяет проверяемость по существу, то же самое, что потом
-независимо оценивает верификатор на PR, но до создания issue, а не после. Кроме того,
-ревьюер — единственная проверка состава `## Контекст` (см. "Контекст: зачем, а не только что"):
-у него, как и у будущего исполнителя, нет плана и PRD.
+This step does not replace the linter (the factory's `issue-lint.js` checks the format: sections, ID
+prefixes, the `Verify:` grammar) — the reviewer checks verifiability in substance, the same thing
+that the verifier later assesses independently on the PR, but before the issue is created, not
+after. In addition, the reviewer is the only check of the composition of `## Context` (see
+"Context: why, not only what"): like the future executor, they have neither the plan nor the PRD.
 
-Ревьюер — read-only агент `research`, запущенный со свежим
-контекстом: он не видит историю текущей сессии, план/PRD, из которых собирался черновик, ни
-предыдущие сообщения пользователя — только черновик тела issue и путь к контракту. Он не создаёт и
-не правит issue, а только возвращает список замечаний.
+The reviewer is a read-only `research` agent started with a fresh context: it sees neither the
+history of the current session, nor the plan/PRD from which the draft was assembled, nor the user's
+earlier messages — only the issue body draft and the path to the contract. It does not create or
+edit the issue, it only returns a list of remarks.
 
-`research` возвращает ответ в своём фиксированном формате (`Finding` / `Relevant files` / `Important
-implementation details` / `Risks or uncertainties`) и сам помечает каждый пункт как "observation",
-не вынося вердиктов ("bug"/severity) — брифуй его так, чтобы задача укладывалась в этот формат, а не
-переопределяла его:
+`research` returns the answer in its fixed format (`Finding` / `Relevant files` / `Important
+implementation details` / `Risks or uncertainties`) and itself marks each item as an
+"observation", without giving verdicts ("bug"/severity) — brief it so that the task fits this
+format rather than redefining it:
 
-Брифуй агента этим текстом дословно (подставив вместо `<черновик>` полный текст тела issue):
+Brief the agent with this text verbatim (substituting the full text of the issue body for
+`<draft>`):
 
 ```
-Задача (Finding): по каждому пункту `Acceptance Criteria`, `Test Requirement` и `Definition of
-Done` в черновике тела issue ниже ответь на два вопроса и сообщи результат как наблюдение
-("observation"), не как вердикт:
-1. Какой конкретно файл, строка или CI-проверка докажет, что этот пункт выполнен?
-2. Как можно выполнить формулировку пункта формально, не выполнив его по сути (обмануть Verify)?
-Приведи это построчно в разделе "Important implementation details" твоего ответа, по одному
-наблюдению на пункт (используй ID пункта).
+Task (Finding): for each item of `Acceptance Criteria`, `Test Requirement` and `Definition of
+Done` in the issue body draft below, answer two questions and report the result as an observation
+("observation"), not as a verdict:
+1. Which concrete file, line or CI check will prove that this item is done?
+2. How can the wording of the item be satisfied formally without satisfying it in substance
+   (cheating the Verify)?
+Give this line by line in the "Important implementation details" section of your answer, one
+observation per item (use the item ID).
 
-Дополнительно в разделе "Risks or uncertainties" перечисли каждый пункт типа `[behavior]`, у
-которого нет отдельного пункта-спутника с негативным или граничным сценарием («Given … When …
-Then …» с отказом/ошибкой/пустым/неверным вводом) — по одному такому спутнику ожидается на каждый
-позитивный `[behavior]`-пункт.
+Additionally, in the "Risks or uncertainties" section list every item of type `[behavior]` that
+has no separate companion item with a negative or boundary scenario ("Given … When … Then …" with a
+refusal/error/empty/invalid input) — one such companion is expected for every positive
+`[behavior]` item.
 
-Также в разделе "Risks or uncertainties" для каждого пункта `Key Invariants`, который говорит о
-границе модуля, контракте или направлении зависимости, оцени change amplification: возьми одно
-естественное будущее изменение вариативной части (другой провайдер, другое правило, другой
-формат), перечисли компоненты, которые после реализации issue пришлось бы менять ради него, и
-отметь как риск каждый несвязанный с этой вариативной частью потребитель в этом списке.
-Отдельно отметь инвариант, сформулированный размыто («код слабо связан»), который нельзя
-проверить по импортам и вызовам.
+Also in the "Risks or uncertainties" section, for every `Key Invariants` item that speaks about a
+module boundary, a contract or the direction of a dependency, assess change amplification: take one
+natural future change of the varying part (another provider, another rule, another format), list
+the components that would have to be changed for it after the issue is implemented, and mark as a
+risk every consumer in this list that is unrelated to this varying part. Separately mark an
+invariant that is worded vaguely ("the code is loosely coupled") and cannot be checked by imports
+and calls.
 
-Отдельным наблюдением в разделе "Finding" оцени секцию `## Контекст`: она должна состоять из
-частей с зачинами `Проблема:`, `Почему важно:`, `После задачи:` и `Граница:`. Назови каждую
-часть, которой нет или из которой без плана и PRD непонятно, в чём проблема сейчас, зачем её
-решать, что и как будет работать после задачи и что в неё не входит. Отдельно назови термины,
-которые в Контексте не пояснены, и места, где Контекст пересказывает `Affects` или критерии
-вместо мотива.
+As a separate observation in the "Finding" section assess the `## Context` section (the earlier
+name `## Контекст` is equivalent): it must consist of parts with the openings `Problem:`, `Why it
+matters:`, `After the task:` and `Boundary:` (the Russian openings `Проблема:`, `Почему важно:`,
+`После задачи:`, `Граница:` of existing issues are equivalent). Name every part that is missing or
+from which, without the plan and the PRD, it is unclear what the problem is now, why it should be
+solved, what and how will work after the task, and what is not included in it. Separately name
+terms that are not explained in the context, and places where the context retells `Affects` or the
+criteria instead of the motive.
 
-У тебя нет доступа к истории текущей сессии, плану/PRD или прошлым сообщениям — только черновик
-ниже и путь к контракту `node_modules/dark-factory/verifier/issue-contract.md` (прочитай его перед черновиком). Ты
-не создаёшь и не правишь issue. Не суди о формате: линтер (`issue-lint.js` фабрики) уже проверяет
-структуру, ID-префиксы и грамматику `Verify:` — твоя задача — проверяемость по существу.
+You have no access to the history of the current session, the plan/PRD or earlier messages — only
+the draft below and the path to the contract `node_modules/dark-factory/verifier/issue-contract.md`
+(read it before the draft). You do not create or edit the issue. Do not judge the format: the
+linter (the factory's `issue-lint.js`) already checks the structure, ID prefixes and the `Verify:`
+grammar — your task is verifiability in substance.
 
-Черновик тела issue:
-<черновик>
+Issue body draft:
+<draft>
 ```
 
-Каждое отмеченное в ответе наблюдение нужно либо исправить в черновике (переформулировать Verify,
-добавить недостающий негативный/граничный пункт, дописать часть Контекста), либо явно зафиксировать в `Key Invariants`
-итогового issue,
-почему оно отклоняется — прежде чем переходить к `gh issue create`. Молча проигнорировать замечание
-нельзя.
+Each observation marked in the answer must either be fixed in the draft (reword the Verify, add the
+missing negative/boundary item, complete a part of the context), or be explicitly recorded in the
+`Key Invariants` of the final issue with the reason why it is rejected — before moving on to `gh
+issue create`. A remark must not be silently ignored.
 
-## Проверяемость пунктов
+## Verifiability of items
 
-- Новые issue всегда создавай в формате v2 и перед отправкой проверяй линтером с `--require-v2`.
-- DoD называет требуемые CI-проверки только пунктами типа `ci` в форме, заданной контрактом.
-  Не добавляй мета-пункт о выполнении Acceptance Criteria.
-- Если задача меняет архитектурную документацию, путь к документу должен быть конкретно известен
-  уже при создании issue и указан проверяемым пунктом; не создавай условный пункт «если задача
-  архитектурная».
-- Для **каждого** пункта типа `behavior` добавь как минимум один отдельный пункт типа `behavior`
-  с негативным или граничным сценарием в форме «Given … When … Then …». Не прячь негативный
-  сценарий только в prose или Manual verification.
-- Ручные, локальные и процессные проверки не помещай в gated-пункты. Если владельцу нужна ручная
-  проверка, используй предусмотренную контрактом негейтящую секцию.
-- Для переноса/удаления/переименования формулируй проверяемое отсутствие конкретного литерала в
-  конкретном пути, когда именно это является требованием результата.
-- Для «остальное не затрагивается» называй конкретные позитивные и негативные примеры, чтобы
-  граница поведения была проверяема тестами.
+- Always create new issues in the v2 format and check them with the linter with `--require-v2`
+  before sending.
+- DoD names the required CI checks only with items of type `ci` in the form set by the contract.
+  Do not add a meta-item about fulfilling the Acceptance Criteria.
+- If the task changes architecture documentation, the path to the document must be concretely known
+  already when the issue is created and stated by a verifiable item; do not create a conditional
+  item "if the task is architectural".
+- For **every** item of type `behavior` add at least one separate item of type `behavior` with a
+  negative or boundary scenario in the form "Given … When … Then …". Do not hide the negative
+  scenario only in prose or in Manual verification.
+- Do not put manual, local and process checks into gated items. If the owner needs a manual check,
+  use the non-gating section provided by the contract.
+- For a move/removal/rename, state the verifiable absence of a concrete literal in a concrete path,
+  when exactly that is the requirement of the result.
+- For "the rest is not affected" name concrete positive and negative examples, so that the boundary
+  of the behavior is testable.
 
-**Label**: выбирай только из уже существующих в репозитории лейблов (`gh label list`) — не
-создавай новые лейблы без явного запроса пользователя. По умолчанию: `enhancement` для
-задач реализации, `documentation` для задач, которые правят только документацию
-(документы проекта) без кода.
+**Label**: choose only from the labels that already exist in the repository (`gh label list`); do
+not create new labels without an explicit request from the user. By default: `enhancement` for
+implementation tasks, `documentation` for tasks that edit only documentation (project documents)
+without code.
 
-**Milestone**: заголовок фазы с префиксом эпика (`EPIC-NN · Фаза N: название`), созданный на
-шаге 2.
+**Milestone**: the phase title with the epic prefix (`EPIC-NN · Phase N: name`) created in step 2,
+or the existing milestone of the same epic and phase found by the duplicate check.
 
-## Итеративные фазы (цикл "правка → прогон → сравнение, пока не сойдётся")
+## Iterative phases (a loop "edit → run → compare, until it converges")
 
-Если фаза плана явно описана как повторяющийся цикл без фиксированного числа проходов (текст
-вида "повторять, пока не выполнены критерии X" / "может потребовать несколько раундов") — не
-создавай для неё issues 1:1 по чек-листу `**Задачи:**`, как для обычной фазы. Вместо этого:
+If a plan phase is explicitly described as a repeating loop without a fixed number of passes (text
+like "repeat until criteria X are met" / "may need several rounds") — do not create issues for it 1:1
+from the `**Tasks:**` checklist, as for an ordinary phase. Instead:
 
-1. Объедини шаги одного прохода цикла (диагностика → правка → перепрогон → обновление лога) в
-   **один issue "Раунд 1 калибровки (Фаза N)"**, с чек-листом этих шагов внутри Body.
-2. Создай отдельный **issue-трекер** ("Цикл раундов (Фаза N) — трекер") в том же milestone — не
-   закрывается до финальной конвергенции, содержит чек-лист `- [ ] #<issue> Раунд N`, обновляемый
-   по мере создания новых раундов.
-3. Финальный шаг фазы (если план описывает отдельную проверку по итогам цикла, например "убедиться
-   что версионная история отражает все итерации") остаётся отдельным issue, но его Body явно
-   говорит, что он закрывается только после того, как issue-трекер подтвердит завершение цикла.
-4. Каждый следующий раунд — новый issue "Раунд N+1 калибровки (Фаза N)", создаётся только когда
-   предыдущий раунд не привёл к конвергенции; добавляется в чек-лист issue-трекера.
+1. Combine the steps of one pass of the loop (diagnosis → edit → re-run → log update) into **one
+   issue "Calibration round 1 (Phase N)"**, with the checklist of these steps inside the Body.
+2. Create a separate **tracker issue** ("Round loop (Phase N) — tracker") in the same milestone —
+   it is not closed until the final convergence and contains the checklist `- [ ] #<issue> Round
+   N`, updated as new rounds are created.
+3. The final step of the phase (if the plan describes a separate check after the loop, for example
+   "make sure the version history reflects all iterations") remains a separate issue, but its Body
+   explicitly says that it is closed only after the tracker issue confirms the end of the loop.
+4. Each next round is a new issue "Calibration round N+1 (Phase N)", created only when the previous
+   round did not lead to convergence; it is added to the tracker issue checklist.
 
-Не создавай сразу несколько раундов наперёд — раунд 2+ появляется только по факту того, что раунд
-1 не сошёлся.
+Do not create several rounds ahead — round 2+ appears only when round 1 has not converged.
 
-## Правила
+## Rules
 
-- Не меняй и не удаляй сам файл плана — скил только читает его.
-- Не создавай issues для фаз/задач, которых нет в файле плана — не придумывай новый скоуп.
-- Один milestone на фазу, ровно так, как фазы разбиты в плане — не объединяй и не дроби их иначе.
-- Если у задачи в плане нет отдельного пояснения кроме самого текста — Body может быть короче
-  (без пустых секций), но footer в конце обязателен всегда — это единственная прослеживаемость
-  обратно к PRD (issue из плана) либо явная фиксация того, что issue создан отдельно, без плана
-  (ad-hoc issue — см. "Формат Issue").
-- Не запускай `gh pr create`, не переключай ветки и не коммить ничего — это только issue-трекер,
-  реализация кода в этот скил не входит.
+- Do not change or delete the plan file itself — the skill only reads it.
+- Do not create issues for phases/tasks that are not in the plan file — do not invent a new scope.
+- One milestone per phase, exactly as the phases are split in the plan — do not merge or split them
+  differently.
+- If a task in the plan has no separate explanation besides its own text, the Body may be shorter
+  (without empty sections), but the footer at the end is always mandatory — it is the only
+  traceability back to the PRD (an issue from a plan) or an explicit statement that the issue was
+  created separately, without a plan (an ad-hoc issue — see "Issue format").
+- Do not run `gh pr create`, do not switch branches and do not commit anything — this is only an
+  issue tracker, implementing code is not part of this skill.

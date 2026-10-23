@@ -12,6 +12,22 @@ const { buildTemplate, renderTemplate, validateOverlay } = require('./templates'
 
 // Independent expectations: written out here, not taken from the module's own constants.
 const PRD_HEADINGS = [
+  'Goal',
+  'Context and Project Alignment',
+  'Dependencies',
+  'User Scenarios',
+  'In Scope',
+  'Out of Scope',
+  'Key Invariants',
+  'Technical Constraints',
+  'Acceptance Criteria',
+  'Test Requirement (Sketch)',
+  'Open Questions',
+  'Documentation to Update',
+  'Proposed Subtask Breakdown (only if this is an epic)',
+];
+// The earlier Russian name of every base section, in the same order; each must stay reserved.
+const PRD_RUSSIAN_NAMES = [
   'Цель',
   'Контекст и согласованность с проектом',
   'Зависимости',
@@ -26,7 +42,11 @@ const PRD_HEADINGS = [
   'Документация, которую потребуется обновить',
   'Предполагаемое дробление на подзадачи (только если это эпик)',
 ];
-const PRD_META = ['**Дата**', '**Статус**: Draft', '**Затрагиваемая часть проекта**', '**Связанный issue/backlog-пункт**'];
+const PLAN_HEADINGS = ['Implementation Phases'];
+const PLAN_RUSSIAN_NAMES = ['Фазы реализации'];
+const PRD_META = ['**Date**', '**Status**: Draft', '**Affected part of the project**', '**Related issue/backlog item**'];
+const PLAN_FIELDS = ['**Goal:**', '**Affects:**', '**Tasks:**', '**Done when:**'];
+const CYRILLIC = /\p{Script=Cyrillic}/u;
 // The five project sections of the example overlays must not be part of the shared base.
 const EXAMPLES_DIR = path.join(REPO_ROOT, 'examples', 'profiles');
 const PROJECT_SECTIONS = fs.readdirSync(EXAMPLES_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).flatMap((entry) => {
@@ -70,9 +90,9 @@ test('overlay adds sections to prd template', (t) => {
     const root = consumer(t, fixture, { overlays: { prd: 'prd.json' }, files: { 'prd.json': { sections: THREE } } });
     const out = buildTemplate('prd', root);
     assert.deepEqual(headings(out), [...PRD_HEADINGS, ...THREE.map((section) => section.title)], fixture);
-    assert.ok(out.startsWith('# PRD: {название фичи}'), fixture);
+    assert.ok(out.startsWith('# PRD: {feature name}'), fixture);
     for (const meta of PRD_META) assert.ok(out.includes(meta), `${fixture}: ${meta}`);
-    assert.ok(out.includes('Точки вариативности нет'), 'content instructions of the base are kept');
+    assert.ok(out.includes('No variation point'), 'content instructions of the base are kept');
     let from = out.indexOf('## Первый раздел');
     for (const section of THREE) {
       const at = out.indexOf(`## ${section.title}\n\n${section.body}`);
@@ -90,12 +110,12 @@ test('overlay adds sections to plan template', (t) => {
   for (const fixture of FIXTURE_PROFILES) {
     const root = consumer(t, fixture, { overlays: { plan: 'plan.json' }, files: { 'plan.json': { sections } } });
     const out = buildTemplate('plan', root);
-    assert.deepEqual(headings(out), ['Фазы реализации', 'Риски', 'Допущения'], fixture);
-    assert.ok(out.startsWith('# Plan: {название фичи}'), fixture);
-    assert.ok(out.includes('**PRD:**') && out.includes('**Дата:**'), fixture);
-    assert.deepEqual(headings(out, '### '), ['Фаза 1: {название}', 'Фаза 2: {название}'], fixture);
-    for (const field of ['**Цель:**', '**Затрагивает:**', '**Задачи:**', '**Когда готова:**']) assert.ok(out.includes(field), `${fixture}: ${field}`);
-    assert.ok(out.indexOf('Рекомендуется epic base branch') < out.indexOf('## Риски'), 'base ends before the additions');
+    assert.deepEqual(headings(out), [...PLAN_HEADINGS, 'Риски', 'Допущения'], fixture);
+    assert.ok(out.startsWith('# Plan: {feature name}'), fixture);
+    assert.ok(out.includes('**PRD:**') && out.includes('**Date:**'), fixture);
+    assert.deepEqual(headings(out, '### '), ['Phase 1: {name}', 'Phase 2: {name}'], fixture);
+    for (const field of PLAN_FIELDS) assert.ok(out.includes(field), `${fixture}: ${field}`);
+    assert.ok(out.indexOf('Recommended epic base branch') < out.indexOf('## Риски'), 'base ends before the additions');
     assert.ok(out.endsWith('## Допущения\n\nНа что опираемся.\n'), fixture);
   }
 });
@@ -109,8 +129,8 @@ test('no overlay yields base template', (t) => {
       assert.deepEqual(headings(prd), PRD_HEADINGS, fixture);
       for (const meta of PRD_META) assert.ok(prd.includes(meta), `${fixture}: ${meta}`);
       const plan = buildTemplate('plan', root);
-      assert.deepEqual(headings(plan), ['Фазы реализации'], fixture);
-      for (const field of ['**Цель:**', '**Затрагивает:**', '**Задачи:**', '**Когда готова:**']) assert.ok(plan.includes(field), field);
+      assert.deepEqual(headings(plan), PLAN_HEADINGS, fixture);
+      for (const field of PLAN_FIELDS) assert.ok(plan.includes(field), field);
       assert.equal(PROJECT_SECTIONS.length, 5);
       for (const text of [prd, plan]) {
         for (const title of PROJECT_SECTIONS) assert.ok(!text.includes(title), `${fixture}: ${title}`);
@@ -129,21 +149,36 @@ test('rejects overlay removing base template section', (t) => {
 });
 
 test('rejects overlay renaming or duplicating base section', (t) => {
-  const cases = [
-    { overlay: { removeSections: ['Цель'], sections: [{ title: 'Задача', body: 'x' }] }, expect: /removeSections.*Цель/s },
-    { overlay: { sections: [{ title: '  ЦЕЛЬ ', body: 'x' }] }, expect: /duplicates base section "Цель"/ },
-    { overlay: { sections: [{ title: 'acceptance   criteria', body: 'x' }] }, expect: /duplicates base section "Критерии готовности \(Acceptance Criteria\)"/ },
-    { overlay: { sections: [{ title: 'Критерии\tготовности (acceptance criteria)', body: 'x' }] }, expect: /duplicates base section "Критерии готовности/ },
+  const reject = (fixture, kind, overlay, expect) => {
+    const root = consumer(t, fixture, { overlays: { [kind]: 'o.json' }, files: { 'o.json': overlay } });
+    assert.throws(() => buildTemplate(kind, root), expect, JSON.stringify(overlay));
+  };
+  // The same shape for every base section of both kinds: new name, earlier Russian name and
+  // spelling variants (case, runs of whitespace, tabs) are all duplicates of that base section.
+  const bases = [
+    ...PRD_HEADINGS.map((title, index) => ({ kind: 'prd', title, old: PRD_RUSSIAN_NAMES[index] })),
+    ...PLAN_HEADINGS.map((title, index) => ({ kind: 'plan', title, old: PLAN_RUSSIAN_NAMES[index] })),
   ];
   for (const fixture of FIXTURE_PROFILES) {
-    for (const { overlay, expect } of cases) {
-      const root = consumer(t, fixture, { overlays: { prd: 'prd.json' }, files: { 'prd.json': overlay } });
-      assert.throws(() => buildTemplate('prd', root), expect, JSON.stringify(overlay));
+    for (const { kind, title, old } of bases) {
+      const variants = [title, ' ' + title.toUpperCase() + ' ', title.toLowerCase().replace(/ /g, '  '), old, old.toUpperCase(), old.replace(/ /g, '\t')];
+      for (const variant of variants) {
+        reject(fixture, kind, { sections: [{ title: variant, body: 'x' }] }, new RegExp('duplicates base section "' + title.replace(/[()]/g, '\\$&') + '"'));
+        reject(fixture, kind, { sections: [{ title: 'Ok', body: 'a\n\n## ' + variant + '\n\nb' }] }, /has a heading .* that duplicates base section/);
+      }
+      reject(fixture, kind, { removeSections: [old], sections: [{ title: old, body: 'x' }] }, /removeSections is not allowed/);
+    }
+    // Acceptance Criteria stays reserved under its English name and the earlier forms.
+    for (const variant of ['acceptance   criteria', 'Критерии\tготовности (acceptance criteria)', 'Критерии готовности']) {
+      reject(fixture, 'prd', { sections: [{ title: variant, body: 'x' }] }, /duplicates base section "Acceptance Criteria"/);
+    }
+    // The shorter earlier names of the epic breakdown section stay reserved too.
+    for (const variant of ['Предполагаемое дробление на подзадачи', 'Proposed Subtask Breakdown']) {
+      reject(fixture, 'prd', { sections: [{ title: variant, body: 'x' }] }, /duplicates base section "Proposed Subtask Breakdown/);
     }
   }
-  const plan = consumer(t, 'single-package', { overlays: { plan: 'plan.json' }, files: { 'plan.json': { sections: [{ title: 'фазы  реализации', body: 'x' }] } } });
-  assert.throws(() => buildTemplate('plan', plan), /duplicates base section "Фазы реализации"/);
-  assert.throws(() => renderTemplate('prd', [{ title: 'Цель', body: 'x' }]), /duplicates base section/);
+  assert.throws(() => renderTemplate('prd', [{ title: 'Goal', body: 'x' }]), /duplicates base section/);
+  assert.throws(() => renderTemplate('prd', [{ title: 'Цель', body: 'x' }]), /duplicates base section "Goal"/);
 });
 
 test('fails when referenced overlay file is missing', (t) => {
@@ -256,7 +291,7 @@ const runCli = (root, cwd, args) => {
 
 const snapshotTree = (dir) => fs.readdirSync(dir, { recursive: true }).map(String).sort();
 
-test('installed template CLI renders both consumer profiles', (t) => {
+test('installed template CLI renders English base templates in both profiles', (t) => {
   const prdOverlay = { sections: [{ title: 'Раздел проекта', body: 'Инструкции проекта.' }] };
   const planOverlay = { sections: [{ title: 'Риски плана', body: 'Что учесть.' }] };
   for (const fixture of FIXTURE_PROFILES) {
@@ -273,7 +308,16 @@ test('installed template CLI renders both consumer profiles', (t) => {
     assert.equal(prd.stdout, renderTemplate('prd'));
     const plan = runCli(plain.root, plain.skillCopy, ['plan', '--project', plain.root]);
     assert.equal(plan.status, 0, plan.stderr);
-    assert.deepEqual(headings(plan.stdout), ['Фазы реализации'], fixture);
+    assert.deepEqual(headings(plan.stdout), PLAN_HEADINGS, fixture);
+    assert.deepEqual(headings(plan.stdout, '### '), ['Phase 1: {name}', 'Phase 2: {name}'], fixture);
+    for (const field of PLAN_FIELDS) assert.ok(plan.stdout.includes(field), `${fixture}: ${field}`);
+    for (const meta of PRD_META) assert.ok(prd.stdout.includes(meta), `${fixture}: ${meta}`);
+    for (const [kind, out] of [['prd', prd.stdout], ['plan', plan.stdout]]) {
+      assert.doesNotMatch(out, CYRILLIC, `${fixture}: the ${kind} base has no Russian text`);
+    }
+    for (const name of [...PRD_RUSSIAN_NAMES, ...PLAN_RUSSIAN_NAMES]) {
+      assert.ok(!headings(prd.stdout).includes(name) && !headings(plan.stdout).includes(name), `${fixture}: ${name} is not a separate section`);
+    }
     assert.deepEqual(snapshotTree(plain.root), before, 'no document is created');
 
     const prdWith = runCli(withOverlay.root, withOverlay.skillCopy, ['prd', '--project', withOverlay.root]);
@@ -282,7 +326,7 @@ test('installed template CLI renders both consumer profiles', (t) => {
     assert.ok(prdWith.stdout.endsWith('## Раздел проекта\n\nИнструкции проекта.\n'));
     const planWith = runCli(withOverlay.root, withOverlay.skillCopy, ['plan', '--project', withOverlay.root]);
     assert.equal(planWith.status, 0, planWith.stderr);
-    assert.deepEqual(headings(planWith.stdout), ['Фазы реализации', 'Риски плана'], fixture);
+    assert.deepEqual(headings(planWith.stdout), [...PLAN_HEADINGS, 'Риски плана'], fixture);
   }
 });
 
