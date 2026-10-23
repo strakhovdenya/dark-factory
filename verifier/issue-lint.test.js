@@ -176,8 +176,10 @@ test('ignores item-looking lines inside fenced code', () => {
 
 test('the example fenced block in issue-contract.md passes with require-v2', () => {
   const md = fs.readFileSync(path.join(__dirname, 'issue-contract.md'), 'utf8');
-  const match = md.match(/## Пример\s+```markdown\n([\s\S]*?)\n```/);
+  const match = md.match(/## Example\s+```markdown\n([\s\S]*?)\n```/);
   assert.ok(match, 'example block not found');
+  assert.ok(match[1].trim().length > 0, 'example block is empty');
+  assert.ok(/^## Context$/m.test(match[1]), 'the example uses the English Context name');
   assert.deepStrictEqual(lint(match[1], CONTRACT, { requireV2: true }).problems, []);
 });
 

@@ -7,6 +7,8 @@
 // `overlays.prd` / `overlays.plan` of its profile (a path relative to `.factory/overlays/`):
 //   { "sections": [ { "title": "Section title", "body": "Instructions" } ] }
 // Nothing here removes, renames or reorders a base section, and no profile value is executed.
+// The base is English; the earlier Russian name of every base section stays in its `aliases`, so
+// an overlay cannot reintroduce a section under the old name.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -14,155 +16,171 @@ const { loadProfile } = require('../profile/load');
 
 const KINDS = ['prd', 'plan'];
 const OVERLAYS_DIR = path.join('.factory', 'overlays');
-const ACCEPTANCE_TITLE = 'Критерии готовности (Acceptance Criteria)';
 
-const PRD_HEADER = `# PRD: {название фичи}
+const PRD_HEADER = `# PRD: {feature name}
 
-**Дата**: {текущая дата}
-**Статус**: Draft
-**Затрагиваемая часть проекта**: {приложение/пакет из \`apps\` профиля, либо несколько}
-**Связанный issue/backlog-пункт**: {ссылка на существующий GitHub issue, если уже есть, либо
-"новая фича — ещё не заведена как issue"}`;
+**Date**: {current date}
+**Status**: Draft
+**Affected part of the project**: {app/package from the profile \`apps\`, or several}
+**Related issue/backlog item**: {link to an existing GitHub issue, if there is one, or
+"new feature — not yet filed as an issue"}`;
 
 /** @type {{ title: string, aliases?: string[], body: string }[]} */
 const PRD_SECTIONS = [
   {
-    title: 'Цель',
-    body: 'Одно-два предложения: что и зачем это нужно пользователю проекта.',
+    title: 'Goal',
+    aliases: ['Цель'],
+    body: 'One or two sentences: what this is and why a user of the project needs it.',
   },
   {
-    title: 'Контекст и согласованность с проектом',
-    body: `- Какой слой/модуль проекта это затрагивает (по файлам правил проекта).
-- Какие существующие артефакты, данные или контракты проекта это затрагивает — если да,
-  перечисли какие.
-- Связанные ADR (номер + одна строка сути), если фича продолжает или пересекается с уже принятым
-  решением.`,
+    title: 'Context and Project Alignment',
+    aliases: ['Контекст и согласованность с проектом'],
+    body: `- Which layer/module of the project this touches (by the project's rule files).
+- Which existing artifacts, data or contracts of the project this touches — if any, list which.
+- Related ADRs (number + one line of the gist), if the feature continues or overlaps an already
+  accepted decision.`,
   },
   {
-    title: 'Зависимости',
-    body: `Что должно уже быть DONE, прежде чем эта фича имеет смысл технически (не просто "было бы неплохо
-сделать сначала", а реальная предпосылка). Если фича соответствует эпику из определения эпиков
-проекта — скопируй сюда его \`## Dependencies\` список пункт за пунктом (номер эпика/фазы + текущий
-статус: DONE/в работе/не начато), не пересказывай своими словами и не сокращай список. Если какая-то
-зависимость ещё не DONE — это не повод молчать, вынеси конфликт в \`## Открытые вопросы\`. Если
-фича не завязана на эпик и явных технических предпосылок нет — напиши "Явных зависимостей не
-найдено".`,
+    title: 'Dependencies',
+    aliases: ['Зависимости'],
+    body: `What must already be DONE before this feature makes technical sense (not just "it would be nice
+to do that first", but a real prerequisite). If the feature corresponds to an epic from the
+project's epic definitions — copy its \`## Dependencies\` list here item by item (epic/phase number +
+current status: DONE/in progress/not started); do not paraphrase it or shorten the list. If some
+dependency is not yet DONE, that is no reason to stay silent: put the conflict into
+\`## Open Questions\`. If the feature is not tied to an epic and has no explicit technical
+prerequisites, write "No explicit dependencies found".`,
   },
   {
-    title: 'Пользовательские сценарии',
-    body: '- Пользователь {действие} -> {результат}',
+    title: 'User Scenarios',
+    aliases: ['Пользовательские сценарии'],
+    body: '- The user {action} -> {result}',
   },
   {
-    title: 'В скоупе',
-    body: 'Конкретный список того, что входит в эту итерацию фичи.',
+    title: 'In Scope',
+    aliases: ['В скоупе'],
+    body: 'A concrete list of what is included in this iteration of the feature.',
   },
   {
-    title: 'Не в скоупе',
-    body: `Явно то, что не делаем сейчас (со ссылкой на решение, если оно есть). Если фича граничит с
-отложенной функциональностью, явно скажи, что эта часть остаётся за скобками. Если фича
-соответствует эпику — каждый пункт его \`## Out of Scope\` должен быть представлен здесь (своими
-словами нормально, пропускать пункты — нет).`,
+    title: 'Out of Scope',
+    aliases: ['Не в скоупе'],
+    body: `Explicitly what we are not doing now (with a link to the decision, if there is one). If the
+feature borders on deferred functionality, say explicitly that this part is left out. If the
+feature corresponds to an epic — every item of its \`## Out of Scope\` must be represented here
+(in your own words is fine, skipping items is not).`,
   },
   {
-    title: 'Ключевые инварианты',
-    body: `Неочевидные правила, которые ограничивают реализацию этой фичи. Проверяй в первую очередь правила
-из файлов правил проекта и принятые ADR, которые касаются затрагиваемой части.
+    title: 'Key Invariants',
+    aliases: ['Ключевые инварианты'],
+    body: `Non-obvious rules that constrain the implementation of this feature. Check first the rules from
+the project's rule files and the accepted ADRs that concern the affected part.
 
-- **Точка вариативности** (обязательный пункт) — какая часть фичи будет меняться независимо
-  (провайдер, политика/правило, формат/рендерер, хранилище, шаг пайплайна) и через какую
-  существующую границу она меняется. Если текущей границы хватает — так и напиши; если
-  вариативной части нет — напиши "Точки вариативности нет". Не предлагай новую абстракцию «на
-  будущее»: она оправдана только второй реализацией сейчас или уже запланированной.`,
+- **Variation point** (mandatory item) — which part of the feature will change independently
+  (provider, policy/rule, format/renderer, storage, pipeline step) and through which existing
+  boundary it changes. If the current boundary is enough, say so; if there is no varying part,
+  write "No variation point". Do not propose a new abstraction "for the future": it is justified
+  only by a second implementation now or one that is already planned.`,
   },
   {
-    title: 'Технические ограничения',
-    body: `Известные ограничения, которые нужно учесть (например: не привязываться к конкретному внешнему
-SDK; unit-тесты не должны зависеть от внешних сервисов — по правилам проекта).
+    title: 'Technical Constraints',
+    aliases: ['Технические ограничения'],
+    body: `Known constraints that must be taken into account (for example: do not bind to a specific
+external SDK; unit tests must not depend on external services — by the project's rules).
 
-Если фича вводит новую изменяемую политику, её последующая замена не должна требовать правок
-несвязанных модулей оркестрации/домена.`,
+If the feature introduces a new changeable policy, replacing it later must not require edits to
+unrelated orchestration/domain modules.`,
   },
   {
-    title: ACCEPTANCE_TITLE,
-    aliases: ['Acceptance Criteria'],
-    body: `Проверяемые, конкретные пункты — этот список должен быть готов к прямому копированию в будущий
-GitHub Issue \`## Acceptance Criteria\`.
+    title: 'Acceptance Criteria',
+    aliases: ['Критерии готовности (Acceptance Criteria)', 'Критерии готовности'],
+    body: `Verifiable, concrete items — this list must be ready to copy directly into the future GitHub
+Issue \`## Acceptance Criteria\`.
 
-- [ ] Критерий 1
-- [ ] Критерий 2
+- [ ] Criterion 1
+- [ ] Criterion 2
 
-Если фича соответствует эпику — каждый пункт его \`## Acceptance Criteria\` должен быть представлен
-здесь. Любой критерий, которого нет в исходном эпике, но который ты добавляешь сам (например, по
-прямому требованию правил проекта, не упомянутому явно в эпике) — помечай инлайн-пометкой вроде
-\`*(добавлено этим PRD, не из определения эпика — обоснование: ...)*\`, чтобы при чтении было видно,
-что взято из источника, а что добавлено сверху.`,
+If the feature corresponds to an epic — every item of its \`## Acceptance Criteria\` must be
+represented here. Any criterion that is not in the source epic but that you add yourself (for
+example, by a direct requirement of the project's rules that the epic does not mention
+explicitly) — mark with an inline note such as
+\`*(added by this PRD, not from the epic definition — rationale: ...)*\`, so that the reader can see
+what came from the source and what was added on top.`,
   },
   {
-    title: 'Test Requirement (набросок)',
-    body: `Какие типы тестов понадобятся (unit / интеграционные / ручная проверка по правилам проекта) — не
-пиши тест-план в деталях, это решается в самом GitHub Issue.`,
+    title: 'Test Requirement (Sketch)',
+    aliases: ['Test Requirement (набросок)'],
+    body: `Which kinds of tests will be needed (unit / integration / manual verification by the project's
+rules) — do not write a detailed test plan; that is decided in the GitHub Issue itself.`,
   },
   {
-    title: 'Открытые вопросы',
-    body: `Всё, что нужно уточнить у пользователя, прежде чем это можно будет оформить как задачу в backlog:
-неясности в скоупе, потенциальные конфликты с существующим ADR, недостающие мокапы/данные.`,
+    title: 'Open Questions',
+    aliases: ['Открытые вопросы'],
+    body: `Everything to clarify with the user before this can be turned into a backlog task: unclear
+scope, potential conflicts with an existing ADR, missing mockups/data.`,
   },
   {
-    title: 'Документация, которую потребуется обновить',
-    body: `Если фича архитектурная (новый/удалённый/переименованный модуль, изменённый data flow, новый
-внешний интерфейс, изменённый конечный автомат, новое ADR-решение) — перечисли, что потребует
-обновления по правилам документации проекта: файлы правил, файл ADR, соответствующие документы.`,
+    title: 'Documentation to Update',
+    aliases: ['Документация, которую потребуется обновить'],
+    body: `If the feature is architectural (a new/removed/renamed module, a changed data flow, a new
+external interface, a changed state machine, a new ADR decision) — list what will need updating by
+the project's documentation rules: rule files, the ADR file, the relevant documents.`,
   },
   {
-    title: 'Предполагаемое дробление на подзадачи (только если это эпик)',
-    body: `{раздел появляется, только если фича — эпик (см. "Режим эпика" скилла \`prd\`) — иначе не включай его в файл вообще}
+    title: 'Proposed Subtask Breakdown (only if this is an epic)',
+    aliases: [
+      'Предполагаемое дробление на подзадачи (только если это эпик)',
+      'Предполагаемое дробление на подзадачи',
+      'Proposed Subtask Breakdown',
+    ],
+    body: `{this section appears only if the feature is an epic (see "Epic mode" of the \`prd\` skill) — otherwise do not include it in the file at all}
 
-Черновой, кандидатный список тем для будущих задач/issues — не сами задачи, это разбивает скилл
-\`plan\` на фазы, а скилл \`issues\` заводит как GitHub issues. Каждый пункт — тема одной задачи, не
-сама задача:
+A draft, candidate list of topics for future tasks/issues — not the tasks themselves; the \`plan\`
+skill splits it into phases and the \`issues\` skill files them as GitHub issues. Each item is the
+topic of one task, not the task itself:
 
-1. {короткое название темы} — {одно предложение, что она покрывает и какой Acceptance Criteria
-   из PRD выше в неё попадает}
+1. {short topic name} — {one sentence on what it covers and which Acceptance Criteria item of
+   the PRD above falls into it}
 2. ...
 
-Если темы естественно зависят друг от друга по порядку (например, схема данных → backend endpoint
-→ frontend) — перечисли их в этом порядке; это подсказка для последовательности, не жёсткое
-требование.
+If the topics naturally depend on each other in order (for example data schema → backend endpoint
+→ frontend) — list them in that order; this is a hint about sequence, not a hard requirement.
 
-Если эпик достаточно большой, чтобы потребовать \`-base\` интеграционную ветку — явно скажи это
-здесь одной строкой ("Рекомендуется epic base branch: \`<имя ветки>\`, т.к. ..."), где имя ветки
-выведено по правилу скилла \`prd\` из \`branchTemplate\` профиля, но не создавай ветку и не
-выбирай номер трекера — это отдельный ручной шаг.`,
+If the epic is large enough to need a \`-base\` integration branch — say so explicitly here in one
+line ("Recommended epic base branch: \`<branch name>\`, because ..."), where the branch name is
+derived by the \`prd\` skill rule from the profile's \`branchTemplate\`, but do not create the
+branch and do not choose the tracker number — that is a separate manual step.`,
   },
 ];
 
-const PLAN_HEADER = `# Plan: {название фичи}
+const PLAN_HEADER = `# Plan: {feature name}
 
 **PRD:** \`<docs.prd>/PRD-<kebab-name>.md\`
-**Дата:** {текущая дата}`;
+**Date:** {current date}`;
 
 /** @type {{ title: string, aliases?: string[], body: string }[]} */
 const PLAN_SECTIONS = [
   {
-    title: 'Фазы реализации',
-    body: `### Фаза 1: {название}
-**Цель:** Что даёт эта фаза
-**Затрагивает:** {приложения из \`apps\` профиля, хранилища данных, внешние интерфейсы}
-**Задачи:**
-- [ ] Задача 1
-- [ ] Задача 2
+    title: 'Implementation Phases',
+    aliases: ['Фазы реализации'],
+    body: `### Phase 1: {name}
+**Goal:** What this phase delivers
+**Affects:** {apps from the profile \`apps\`, data stores, external interfaces}
+**Tasks:**
+- [ ] Task 1
+- [ ] Task 2
 
-**Когда готова:** закрывает пункт(ы) \`## Критерии готовности\` PRD: "{дословная или близкая
-цитата конкретного AC-пункта}". Не пиши расплывчатый критерий вроде "работает нормально" —
-только то, что можно проверить и что явно ведёт к конкретному AC из PRD.
+**Done when:** closes item(s) of the PRD \`## Acceptance Criteria\`: "{verbatim or close
+quote of the specific AC item}". Do not write a vague criterion such as "works fine" — only what
+can be verified and what leads explicitly to a specific AC of the PRD.
 
-### Фаза 2: {название}
+### Phase 2: {name}
 ...
 
-{Если фазы вместе затрагивают несколько приложений проекта (или их больше двух, и каждая — независимо
-тестируемый шаг) — добавь после списка фаз одну строку: "Рекомендуется epic base branch:
-\`<имя ветки>\`, т.к. ...", где имя ветки выведено по правилу скилла \`plan\` из \`branchTemplate\`
-профиля. Не создавай ветку и не выбирай номер трекера — это отдельный ручной шаг, как в /prd.}`,
+{If the phases together touch several apps of the project (or there are more than two, each an
+independently testable step) — add one line after the list of phases: "Recommended epic base
+branch: \`<branch name>\`, because ...", where the branch name is derived by the \`plan\` skill rule
+from the profile's \`branchTemplate\`. Do not create the branch and do not choose the tracker
+number — that is a separate manual step, as in /prd.}`,
   },
 ];
 

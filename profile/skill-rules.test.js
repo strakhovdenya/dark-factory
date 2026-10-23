@@ -207,7 +207,7 @@ test('verify agent reads gates from the profile and has no project commands', ()
 test('issues and task-lifecycle use the installed factory linter and contract', () => {
   const read = (name) => fs.readFileSync(path.join(root, 'skills', name, 'SKILL.md'), 'utf8');
   const issues = read('issues');
-  assert.ok(issues.includes('node node_modules/dark-factory/verifier/issue-lint.js <файл> --require-v2'));
+  assert.ok(issues.includes('node node_modules/dark-factory/verifier/issue-lint.js <file> --require-v2'));
   assert.ok(issues.includes('node_modules/dark-factory/verifier/issue-contract.md'));
   for (const text of [issues, read('task-lifecycle')]) {
     assert.ok(!text.includes('.github/verifier/issue-contract.md'));

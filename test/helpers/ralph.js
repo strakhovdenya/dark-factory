@@ -7,6 +7,7 @@
 
 const childProcess = require('node:child_process');
 const { EventEmitter } = require('node:events');
+const { mock } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -16,6 +17,11 @@ const { profileCopy } = require('./profiles');
 const sandbox = require('../../ralph/sandbox');
 const { gitignoreText, installFactoryPackage, runSetupScript } = require('./factory-package');
 const { freezeSnapshot } = require('../../ralph/trusted-profile');
+
+// The controller logs progress with console.log (multi-byte text). In a test file this output shares
+// the pipe with the test runner's own serialized events, and on Linux CI it intermittently broke the
+// runner ("Unable to deserialize cloned data"). Tests that check log lines mock console.log themselves.
+mock.method(console, 'log', () => {});
 
 const HUMAN_VERDICT = 'NEEDS.HUMAN+';
 const HUMAN_LABEL = 'needs-human';

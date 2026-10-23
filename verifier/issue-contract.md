@@ -18,7 +18,7 @@ format of an issue body, not how an issue is written or how a PR is judged.
 
 | Section | Required | ID prefix |
 | --- | --- | --- |
-| `Контекст` | yes | — |
+| `Context` (or `Контекст`) | yes | — |
 | `Affects` | yes | — |
 | `Docs to Read` | yes | — |
 | `Key Invariants` | yes | `INV` |
@@ -28,8 +28,9 @@ format of an issue body, not how an issue is written or how a PR is judged.
 | `Dependencies` | yes | — |
 | `Manual verification (owner, not gated)` | no | — |
 
-A section may have alternative names. `Контекст` is also accepted as
-`Context`. A heading must match a name exactly (case-sensitive; trailing
+A section may have alternative names. The context section is accepted under
+both names, `Context` and the earlier Russian `Контекст`; new issues use
+`Context`, and neither name is deprecated or given an end date. A heading must match a name exactly (case-sensitive; trailing
 spaces are ignored). Code finds a section by any of its names through this
 contract; no other list of section names exists.
 
@@ -85,17 +86,20 @@ Invariants (Key Invariants):
 | `ci` | a CI check on the PR head succeeds | `Verify: ci "<CI check name>"` |
 | `absence` | a literal must not occur in a file | `Verify: absent "<literal>" in <path>` |
 
-## Перечисления через запятую
+## Comma-separated lists
 
-A comma-separated list in the text of an item (for example «с колонками X, Y,
-Z») names a set of required elements, not their order. Position is required
-only when the item says so explicitly with «в этом порядке» or «в указанном
-порядке».
+A comma-separated list in the text of an item (for example "with columns X, Y,
+Z") names a set of required elements, not their order. Position is required
+only when the item says so explicitly with "in this order" or "in the given
+order". Existing Russian issues state this with «в этом порядке» or «в указанном
+порядке»; both forms are recognised the same way.
 
-- Без порядка: «таблица с колонками номер, ключ, head_sha» — проверяется
-  наличие всех трёх колонок; порядок колонок в реализации произвольный.
-- С порядком: «таблица с колонками в этом порядке: номер, ключ, head_sha» —
-  порядок колонок входит в требование и проверяется.
+- Without order: "a table with columns number, key, head_sha" (Russian:
+  «таблица с колонками номер, ключ, head_sha») — the presence of all three columns is
+  checked; the order of the columns in the implementation is arbitrary.
+- With order: "a table with columns in this order: number, key, head_sha"
+  (Russian: «таблица с колонками в этом порядке: номер, ключ, head_sha») — the
+  order of the columns is part of the requirement and is checked.
 
 ## Forbidden wording
 
@@ -104,40 +108,43 @@ Invariants must not contain (case-insensitive) any phrase from
 `forbiddenPhrases` in the JSON: they describe manual, local or process-only
 steps that the verifier cannot check. Items also must not be conditional:
 text starting with `Если ` / `If `, or containing `если применимо` /
-`if applicable`. `Контекст` and `Manual verification (owner, not gated)` are
+`if applicable`. `Context` / `Контекст` and `Manual verification (owner, not gated)` are
 not checked.
 
-## Пример
+## Example
 
 ```markdown
-## Контекст
-Экспорт должен отдавать PDF с человекочитаемым именем файла.
+## Context
+Problem: the export CLI (`scripts/export-name.js`) takes the output file name from the argument as is and writes the file under it. A name like `../x.pdf` writes a file outside the export directory.
+
+Why it matters: the name comes from the user, so it is untrusted input that reaches a file system write. A file outside the export directory can overwrite other data.
+
+After the task: the CLI checks the name before writing; a name with a path separator, or an empty one, is rejected with an error and no file is created. Valid names work as before. The restriction is described in `docs/export.md`.
+
+Boundary: the file content format and the export directory do not change; there are no adjacent tasks.
 
 ## Affects
-- `src/export/download-name.js`
-- `src/export/download-name.spec.js`
+- `scripts/export-name.js`
+- `scripts/export-name.spec.js`
 - `docs/export.md`
-- `config/export.json`
 
 ## Docs to Read
-- `docs/export.md` — раздел «Имена файлов»
+- `docs/export.md` — section "File names"
 
 ## Key Invariants
-- INV-1 Каноническое имя артефакта на диске не меняется.
-- INV-2 Имя файла не содержит символов разделителя пути.
+- INV-1 The name is checked before the output file is written.
 
 ## Acceptance Criteria
-- [ ] AC-1 [behavior] buildDownloadName возвращает имя вида Company_Role_CV.pdf. Verify: src/export/download-name.spec.js "builds company and role name"
-- [ ] AC-2 [doc] docs/export.md описывает формат имени файла. Verify: docs/export.md
-- [ ] AC-3 [config] config/export.json задаёт суффикс CV. Verify: config/export.json
-- [ ] AC-4 [absence] В модуле нет старого имени 04_cv_export.pdf. Verify: absent "04_cv_export.pdf" in src/export/download-name.js
+- [ ] AC-1 [behavior] A valid name is accepted by the CLI. Verify: scripts/export-name.spec.js "accepts valid output name"
+- [ ] AC-2 [behavior] Given a name contains a path separator When the CLI checks the name Then the command fails before the file is written. Verify: scripts/export-name.spec.js "rejects path separator before write"
+- [ ] AC-3 [doc] The documentation describes the file name restriction. Verify: docs/export.md
 
 ## Test Requirement
-- [ ] TR-1 [behavior] Тест отклоняет имя с символом слэша. Verify: src/export/download-name.spec.js "rejects slash in name"
+- [ ] TR-1 [behavior] Given an empty name When the CLI checks the name Then the command fails. Verify: scripts/export-name.spec.js "rejects empty output name"
 
 ## Definition of Done
-- [ ] DOD-1 [ci] Проверка тестов на голове PR успешна. Verify: ci "Test (scripts)"
+- [ ] DOD-1 [ci] The scripts check on the PR head succeeds. Verify: ci "Test (scripts)"
 
 ## Dependencies
-Нет.
+None.
 ```
