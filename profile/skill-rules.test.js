@@ -5,7 +5,10 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { loadProfile } = require('./load');
-const { BASE_SKILLS, requiredSkillsFor } = require('./skill-rules');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
+const { BASE_SKILLS, requiredSkillsFor, requiredSkillDetailsFor } = require('./skill-rules');
+const { profileCopy } = require('../test/helpers/profiles');
 
 const root = path.resolve(__dirname, '..');
 const FIXTURES = ['monorepo', 'single-package'];
@@ -217,4 +220,62 @@ test('issues and task-lifecycle use the installed factory linter and contract', 
   const adr = read('adr');
   assert.ok(!adr.includes('FILE_RULES'));
   assert.ok(adr.includes('docs.adr') && adr.includes('no ADR file is\n  configured'));
+});
+
+const SKILL_GATE = path.join(root, 'hooks', 'skill-gate.js');
+const gateMessage = (projectRoot, relative) => {
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: projectRoot };
+  const input = JSON.stringify({ session_id: `skill-rules-test-${process.pid}-none`, tool_input: { file_path: path.join(projectRoot, relative) } });
+  const result = spawnSync(process.execPath, [SKILL_GATE], { input, encoding: 'utf8', cwd: os.tmpdir(), env });
+  assert.strictEqual(result.status, 2, result.stderr);
+  return result.stderr;
+};
+
+const LABELLED_RULES = [
+  { path: 'pkg/ui', extensions: ['.tsx'], label: 'ui', skills: ['ui-patterns', 'js-gof'] },
+  { path: 'pkg', extensions: ['.tsx', '.css'], label: 'pkg', skills: ['styles'] },
+  { path: 'pkg/ui', extensions: ['.tsx'], label: 'ui', skills: ['a11y'] },
+  { path: 'other', extensions: ['.tsx'], label: 'other area', skills: ['other'] },
+];
+
+test('hook details preserve requiredSkillsFor results and project labels', (t) => {
+  for (const name of FIXTURES) {
+    const profile = withProfile(name, { skillRules: LABELLED_RULES, docs: { adr: 'docs/adr.md' } });
+    const cases = [
+      [['pkg/ui/Button.tsx'], [...BASE, 'ui-patterns', 'styles', 'a11y'], ['ui', 'pkg']],
+      [['pkg/ui/x.css'], ['styles'], ['pkg']],
+      [['src/a.ts'], BASE, []],
+      [['docs/adr.md'], ['adr'], []],
+      [['pkg/ui/Button.tsx', 'docs/adr.md'], [...BASE, 'adr', 'ui-patterns', 'styles', 'a11y'], ['ui', 'pkg']],
+      [affects('`pkg/ui/Button.tsx`'), [...BASE, 'ui-patterns', 'styles', 'a11y'], ['ui', 'pkg']],
+      [['notes.md'], [], []],
+    ];
+    for (const [input, skills, labels] of cases) {
+      const details = requiredSkillDetailsFor(profile, input);
+      assert.deepStrictEqual(details, { skills, labels }, `${name}: ${input}`);
+      assert.deepStrictEqual(requiredSkillsFor(profile, input), details.skills, `${name}: ${input}`);
+    }
+    const projectRoot = profileCopy(t, name, (copy) => {
+      copy.skillRules = LABELLED_RULES;
+    });
+    const message = gateMessage(projectRoot, 'pkg/ui/Button.tsx');
+    assert.ok(message.includes('editing pkg/ui/Button.tsx (ui, pkg) requires'), name);
+    assert.ok(message.includes(`session yet: ${[...BASE, 'ui-patterns', 'styles', 'a11y'].join(', ')}.`), name);
+  }
+});
+
+test('hook details ignore unmatched labels without weakening base skills', (t) => {
+  for (const name of FIXTURES) {
+    const profile = withProfile(name, { skillRules: LABELLED_RULES });
+    const details = requiredSkillDetailsFor(profile, ['src/main.ts']);
+    assert.deepStrictEqual(details, { skills: BASE, labels: [] }, name);
+    assert.ok(!requiredSkillDetailsFor(profile, ['pkg/ui/Button.tsx']).labels.includes('other area'));
+    const projectRoot = profileCopy(t, name, (copy) => {
+      copy.skillRules = LABELLED_RULES;
+    });
+    const message = gateMessage(projectRoot, 'src/main.ts');
+    assert.ok(message.includes('editing src/main.ts requires'), name);
+    for (const label of ['other area', '(ui', '(pkg']) assert.ok(!message.includes(label), `${name}: ${label}`);
+    assert.ok(message.includes(`session yet: ${BASE.join(', ')}.`), name);
+  }
 });
