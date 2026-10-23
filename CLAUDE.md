@@ -48,12 +48,7 @@ Rules of placement:
 
 ## Adding a new factory element
 
-Applies to a Ralph step, a verifier check, a hook, or a skill:
-
-1. The knob is declared in the **profile schema**; the element is **disabled by default**. For a Ralph step the knob is its name in `ralph.enabledSteps` (and, for a step with a fix, its key in `ralph.stepBudgets`); register it in a step registry (`ralph/steps/registry.js`, or a prepared one passed as `deps.stepRegistry`) without editing `ralph/core.js` or the base steps. The only exception is a mandatory diagnostic artifact of the round protocol from the closed list in invariant 6; it needs no knob, but it must meet every condition stated there.
-2. Tests cover **two fixture profiles**: "monorepo" and "single package". No test depends on one project's layout.
-3. If the element can influence the verifier verdict, run the **reference PR set** (cases with an expected verifier verdict) and confirm no verdict changes unexpectedly.
-4. Add an entry to `CHANGELOG`.
+Applies to a Ralph step, a verifier check, a doctor check, a hook, or a package skill. The one complete procedure is [docs/adding-an-element.md](docs/adding-an-element.md): the registration point and the knob of each kind, default-off, tests on the "monorepo" and "single package" fixture profiles, the reference PR set when the verdict can change, CHANGELOG, and delivery by release and pin update. Follow it; it does not replace the Core invariants above (invariant 6 keeps the only closed list of diagnostic exceptions). The `add-factory-element` skill drives it in a session.
 
 ## Release cycle (edit → release → bump tag)
 

@@ -12,7 +12,8 @@ Step-by-step instructions live in `docs/` of this repository. They are not part 
 
 - [Connecting a project](docs/connecting-a-project.md): the order of installation, profile, trusted configs, GitHub settings, wrappers, hooks, the optional Ralph and Judge, and what `factory doctor` does and does not prove.
 - [Upgrading the pinned release](docs/upgrading.md): moving the tag, the lock and the commit SHA of every wrapper in one PR, and recovery when the hooks block Claude Code.
-- [Adding a setting](docs/adding-a-setting.md): adding a field to an existing mechanism, with `ralph.stepBudgets` as the worked example. A new step, check, hook or skill follows [CLAUDE.md](CLAUDE.md).
+- [Adding a setting](docs/adding-a-setting.md): adding a field to an existing mechanism, with `ralph.stepBudgets` as the worked example.
+- [Adding an element](docs/adding-an-element.md): adding a new Ralph step, verifier check, doctor check, hook or package skill: where each is registered and enabled, proving that the disabled variant changes nothing, and delivery by release and pin update.
 
 ## Repository layout
 
