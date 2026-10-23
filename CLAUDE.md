@@ -24,8 +24,9 @@ Rules of placement:
 
 ## Commands
 
-- `npm test` — the only test command (`node --test`). Tests must pass on **Windows and Linux**, **without network** and **without a real AI** (stub the agent/model). CI job `Test (Linux)` runs it on every PR.
+- `npm test` — the test command of every change (`node --test`). Tests must pass on **Windows and Linux**, **without network**, **without Docker** and **without a real AI** (stub the agent/model). CI jobs `Test (Linux)` and `Test (Windows)` run it on every PR.
 - Portable tests (`ralph/**/*.test.js`) replace processes at the `child_process` boundary and need no Docker. Tests that need a real Docker engine live in `test/integration/`, are not part of `npm test` and are never replaced by a skip that reports success.
+- The one exception to "a single test command": the Ralph Docker integration, `npm run prepare:ralph:sandbox` (builds the images; the only step that downloads) and then `npm run test:ralph:sandbox` (runs the suite on the prepared images, Linux host with a Linux Docker engine, stub agent, no AI). CI job `Ralph sandbox integration` runs both on every PR. See `ralph/README.md`.
 
 ## Core invariants (do not break)
 

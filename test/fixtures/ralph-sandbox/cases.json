@@ -1,5 +1,5 @@
 {
-  "description": "Map of every test of the reference sandbox suite (source/sandbox.test.js.txt, a verbatim snapshot) to where its assertions are verified in the factory. Data only, not executable tests. 'portable' cases run under npm test (ralph/sandbox.test.js) with the processes replaced at the child_process boundary. 'integration' cases need a real Docker engine and belong to the Docker integration task (test/integration/ralph-sandbox.test.js, created there after the controller move); until that task they are NOT verified, and no portable test stands in for them.",
+  "description": "Map of every test of the reference sandbox suite (source/sandbox.test.js.txt, a verbatim snapshot) to where its assertions are verified in the factory. Data only, not executable tests. 'portable' cases run under npm test (ralph/sandbox.test.js) with the processes replaced at the child_process boundary. 'integration' cases need a real Docker engine: `integration` names the executable tests of the Docker integration (test/integration/ralph-sandbox.test.js, `npm run test:ralph:sandbox`). The status 'integration-mapped' records that executable coverage exists, never that a run passed: the result of a run is proven only by the CI job \"Ralph sandbox integration\". ralph/sandbox-cases.test.js keeps the map honest.",
   "source": {
     "repository": "reference consumer project (jobflow)",
     "commit": "8ecb667",
@@ -8,8 +8,8 @@
   },
   "destinations": {
     "portable": "ralph/sandbox.test.js, task #18",
-    "integration": "test/integration/ralph-sandbox.test.js, task #46",
-    "both": "the argument-building part is portable (#18), the part that needs a real container is integration (#46)"
+    "integration": "test/integration/ralph-sandbox.test.js, task #46 (real Docker, not part of npm test)",
+    "both": "the argument-building part is portable (#18), the part that needs a real container is in the Docker integration (#46)"
   },
   "cases": [
     {
@@ -21,7 +21,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"does not expose operator credentials\"",
+      "status": "integration-mapped"
     },
     {
       "source": "rejects sandbox config mounting operator home",
@@ -54,7 +55,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"does not expose operator credentials\"",
+      "status": "integration-mapped"
     },
     {
       "source": "sandbox has no operator gh config",
@@ -63,7 +65,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"does not expose operator credentials\"",
+      "status": "integration-mapped"
     },
     {
       "source": "sandbox blocks request to foreign host",
@@ -73,7 +76,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46); the proxy decision itself is covered by the portable case 'proxy policy ...' entries"
+      "integration": "test/integration/ralph-sandbox.test.js \"enforces proxy allowlist without direct egress\"; \"fails when controlled service is not reachable\"",
+      "status": "integration-mapped"
     },
     {
       "source": "gate sandbox has no network",
@@ -83,7 +87,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"isolates real gate network and git directory\"",
+      "status": "integration-mapped"
     },
     {
       "source": "proxy policy allows allowlisted host",
@@ -153,7 +158,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"preserves ownership and external session journals\"",
+      "status": "integration-mapped"
     },
     {
       "source": "git works inside sandbox on run dir",
@@ -163,7 +169,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"preserves ownership and external session journals\"",
+      "status": "integration-mapped"
     },
     {
       "source": "agent session journals persist after container exit",
@@ -173,7 +180,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker and the agent/workspace modules of the controller task (#45, #46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"preserves ownership and external session journals\"; \"stops timed out steps and preserves journals\"",
+      "status": "integration-mapped"
     },
     {
       "source": "session journals stay outside run dir clone",
@@ -183,7 +191,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker and the agent/workspace modules of the controller task (#45, #46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"preserves ownership and external session journals\"; \"stops timed out steps and preserves journals\"",
+      "status": "integration-mapped"
     },
     {
       "source": "container is labelled with run id",
@@ -193,7 +202,8 @@
       ],
       "destination": "both",
       "portable": "ralph/sandbox.test.js \"preserves reference sandbox protections\"",
-      "status": "ported for the arguments; the running container part is not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"labels real containers with consumer and run\"",
+      "status": "ported for the run arguments and labels; integration-mapped for a running container found by its labels"
     },
     {
       "source": "sandbox tests do not skip when runtime is missing",
@@ -203,7 +213,8 @@
       ],
       "destination": "both",
       "portable": "ralph/sandbox.test.js \"preserves reference sandbox protections\"",
-      "status": "ported for assertAvailable and the absence of a host fallback; the no-skip guard of the integration file is not-run: it belongs to the integration file (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"fails explicitly when integration prerequisites are missing\"; \"rejects failed empty or skipped integration results\"",
+      "status": "ported for assertAvailable and the absence of a host fallback; integration-mapped for the no-skip guard of the integration run"
     },
     {
       "source": "home check treats dotted names inside home as inside and follows links into home",
@@ -244,7 +255,8 @@
       ],
       "destination": "integration",
       "portable": null,
-      "status": "not-run: needs Docker (#46); the read-only mount argument is covered by the portable \"preserves mount and workdir boundaries\""
+      "integration": "test/integration/ralph-sandbox.test.js \"enforces agent and git filesystem boundaries\"; \"isolates real gate network and git directory\"",
+      "status": "integration-mapped"
     },
     {
       "source": "a sandbox step that exceeds its time limit is stopped",
@@ -254,7 +266,8 @@
       ],
       "destination": "both",
       "portable": "ralph/sandbox.test.js \"cleans up owned resources after failure\"",
-      "status": "ported with a replaced Docker CLI (timeout error, removal of the container, no host command); the real stop of a sleeping container is not-run: needs Docker (#46)"
+      "integration": "test/integration/ralph-sandbox.test.js \"stops timed out steps and preserves journals\"",
+      "status": "ported with a replaced Docker CLI; integration-mapped for the real stop of a sleeping container"
     },
     {
       "source": "install env may not override proxy or Docker settings",

@@ -1,0 +1,17 @@
+{
+  "description": "Neutral configuration of the Ralph Docker integration (test/integration/ralph-sandbox.test.js). `sandbox` is the source image built by the package's own sandbox.buildImage; `stubImage` is derived from it by test/fixtures/ralph-sandbox/Dockerfile with a stub `claude` first in PATH. `service` is the controlled HTTPS service (a minimal npm registry) reachable only on a test network, under an allowlisted and a not allowlisted name. No real credentials, no real registry after the images are prepared.",
+  "sandbox": {
+    "image": "ralph-sandbox-it:source",
+    "nodeVersion": "22",
+    "claudeCodeVersion": "2.1.283",
+    "allowedHosts": ["registry.ralph-fixture.test"]
+  },
+  "stubImage": "ralph-sandbox-it:stub",
+  "service": {
+    "allowedHost": "registry.ralph-fixture.test",
+    "blockedHost": "mirror.ralph-fixture.test",
+    "package": "ralph-fixture-pkg",
+    "versions": ["1.0.0", "2.0.0"],
+    "missingPackage": "ralph-fixture-missing"
+  }
+}

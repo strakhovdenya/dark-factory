@@ -59,6 +59,32 @@ const installFactoryPackage = (nodeModules, { metaskills = 'hoisted' } = {}) => 
   return { packageRoot, setupScript: path.join(packageRoot, 'bin', 'setup.js') };
 };
 
+/** Package paths (`node_modules/<name>`) of the runtime dependencies in the lock file; a nested one comes with its parent. */
+const runtimeDependencyPaths = () => {
+  const lock = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package-lock.json'), 'utf8'));
+  return Object.entries(lock.packages)
+    .filter(([key, entry]) => key.startsWith('node_modules/') && !key.includes('/node_modules/') && !entry.dev && !entry.devOptional)
+    .map(([key]) => key);
+};
+
+/**
+ * The factory as `npm install` leaves it, offline: the package at `<nodeModules>/dark-factory` and
+ * every runtime dependency of the lock file copied from this repository's node_modules. Nothing is
+ * downloaded; a dependency missing locally is an error.
+ * @returns {{ packageRoot: string, dependencies: string[] }}
+ */
+const installFactoryRuntime = (nodeModules) => {
+  const packageRoot = path.join(nodeModules, 'dark-factory');
+  copyPackageEntries(packageRoot);
+  const dependencies = runtimeDependencyPaths();
+  for (const dependency of dependencies) {
+    const source = path.join(REPO_ROOT, dependency);
+    if (!fs.existsSync(source)) throw new Error(`runtime dependency ${dependency} is not installed; run npm ci first`);
+    fs.cpSync(source, path.join(nodeModules, dependency.slice('node_modules/'.length)), { recursive: true });
+  }
+  return { packageRoot, dependencies };
+};
+
 /** Runs a setup script as a separate Node process; ajv and minimatch come from this repository. */
 /** @type {(...args: any[]) => any} */
 const runSetupScript = (setupScript, { args = [], cwd, env = {} } = {}) => {
@@ -71,4 +97,15 @@ const runSetupScript = (setupScript, { args = [], cwd, env = {} } = {}) => {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 };
 
-module.exports = { REPO_ROOT, copyPackageEntries, skillNames, agentNames, gitignoreText, baseDestinations, installFactoryPackage, runSetupScript };
+module.exports = {
+  REPO_ROOT,
+  copyPackageEntries,
+  skillNames,
+  agentNames,
+  gitignoreText,
+  baseDestinations,
+  installFactoryPackage,
+  runtimeDependencyPaths,
+  installFactoryRuntime,
+  runSetupScript,
+};

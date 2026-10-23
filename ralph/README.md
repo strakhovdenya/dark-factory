@@ -11,10 +11,29 @@ The controller is in the package, but these stages are still missing; until they
 | Missing stage | What it adds |
 |---|---|
 | Hooks | the skill-gate and lint/typecheck hooks of the package |
-| Docker integration tests | real-container proof of the sandbox protections (`test/integration/`); the reference Docker scenarios are recorded in `test/fixtures/ralph-controller/integration-cases.json` and are **not** verified by `npm test` |
 | Packed-package check in consumers | the controller run from the installed tarball |
+| Real Claude run in a consumer | a bounded run of the pinned `claude` CLI with the real `buildClaudeArgs` flags and the `code-review` skill |
 
 There is no host fallback at any stage: without Docker nothing runs.
+
+## Three levels of verification
+
+| Level | Command | Where it runs | What it proves |
+|---|---|---|---|
+| Portable | `npm test` | Linux and Windows, no Docker, no network, no AI | the controller, the sandbox arguments and policies, with processes replaced at the `child_process` boundary |
+| Docker integration | `npm run prepare:ralph:sandbox`, then `npm run test:ralph:sandbox` | Linux host (WSL included) with a Linux Docker engine and BuildKit | the real containers, mounts, networks, proxy, npm, time limits and cleanup, with a stub agent |
+| Real Claude | a separate task | a consumer | the pinned CLI with the real flags and the `code-review` skill |
+
+### Docker integration
+
+- **Requirements.** A Linux host (a Linux distribution under WSL counts) with a Linux Docker engine and BuildKit (`docker buildx`). Any other host or engine stops the run with the reason before any scenario; Windows with Docker Desktop is not a supported platform of this suite (the controller on Windows is covered by `npm test`). `npm ci` must have run: the factory copy is made offline from this checkout's `node_modules`.
+- **Configuration.** `test/fixtures/ralph-sandbox/integration.json`: Node `22`, the exact Claude CLI `2.1.283`, the image tags (`ralph-sandbox-it:source`, `ralph-sandbox-it:stub`) and the names of the controlled test service. The base fixture profiles keep their placeholder versions.
+- **`npm run prepare:ralph:sandbox`** (`test/integration/prepare-ralph-sandbox.js`) is the only step that builds or downloads: it lays out the current working version of the factory as an installed package with its runtime dependencies, builds the source image with that copy's own `sandbox.buildImage`, then the derived stub image (`test/fixtures/ralph-sandbox/Dockerfile`), which puts a stub `claude` first in `PATH` and carries the factory copy, the fixture commands and a minimal HTTPS npm registry with a test certificate.
+- **`npm run test:ralph:sandbox`** (`test/integration/run-ralph-sandbox.js`) never builds or pulls. It fails with the reason when the Docker CLI is missing, the engine is unreachable or not Linux, an image is missing, or `claude --version` of the source image is not the pin; then it runs `test/integration/ralph-sandbox.test.js` with the node test runner and fails on any failure, cancellation, skip, todo or a run without tests. After the images are prepared nothing reaches `registry.npmjs.org` or another external host: npm talks to the fixture registry through the real proxy.
+- **Runs root.** Clones, sessions and every mount source live in the system temporary directory, which must be outside the operator's home (the suite checks it); the same rule as the `runsRoot` of a real run.
+- **CI.** The workflow `.github/workflows/ralph-sandbox-integration.yml` (job `Ralph sandbox integration`) runs automatically on every pull request (opened, new commits, reopened) on the head of the PR, and can be started with `workflow_dispatch`. It prepares the images and runs the suite as separate steps, without AI secrets.
+- **What the stub proves and what it does not.** The stub is a separate process in the real agent container: it reads the permission settings the controller wrote for its pass, probes the container (credentials, home, mounts, `.git`, network) and answers like the CLI. It proves the controller's settings and the container boundaries; it does not prove that a real Claude obeys the permission rules, the real CLI flags or the `code-review` skill: those belong to the real Claude run.
+- **Maps.** The reference Docker scenarios (`test/fixtures/ralph-sandbox/cases.json`, `test/fixtures/ralph-controller/integration-cases.json`) name the integration tests that execute them. The status `integration-mapped` records coverage, never a passed run; the result of a run is the CI job.
 
 ## Skills and agents setup in the clone
 

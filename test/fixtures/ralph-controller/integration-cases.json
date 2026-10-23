@@ -1,5 +1,5 @@
 {
-  "description": "Scenarios of the reference controller suites that need a real Docker engine. The source files in source/ are verbatim snapshots of the reference consumer project's tests (data, not executable tests). These scenarios are NOT verified by npm test: they belong to the Docker integration task, which creates test/integration/ for them. A 'portable' entry names the portable test (ralph/<file>.test.js) that covers the part that does not need a container; it does not stand in for the container assertions.",
+  "description": "Scenarios of the reference controller suites that need a real Docker engine. The source files in source/ are verbatim snapshots of the reference consumer project's tests (data, not executable tests). These scenarios are not verified by npm test: `integration` names the executable tests of the Docker integration (test/integration/ralph-sandbox.test.js, `npm run test:ralph:sandbox`). The status 'integration-mapped' records that executable coverage exists, never that a run passed; the result is proven only by the CI job \"Ralph sandbox integration\". A 'portable' entry names the portable test (ralph/<file>.test.js) that covers the part that does not need a container; it does not stand in for the container assertions.",
   "source": {
     "repository": "reference consumer project",
     "commit": "8ecb667",
@@ -10,79 +10,116 @@
     {
       "source": "agent.test.js.txt",
       "test": "sandboxed agent receives only explicit credentials",
-      "assertions": ["inside the container only the explicit credential is set, no GH_TOKEN/GITHUB_TOKEN", "HOME is the image home", "the operator home is not mounted"],
+      "assertions": [
+        "inside the container only the explicit credential is set, no GH_TOKEN/GITHUB_TOKEN",
+        "HOME is the image home",
+        "the operator home is not mounted"
+      ],
       "portable": "ralph/agent.test.js \"supports both explicit sandbox credential types\"",
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"does not expose operator credentials\"; \"refuses ambient operator credentials\"",
+      "status": "integration-mapped"
     },
     {
       "source": "agent.test.js.txt",
       "test": "timed out sandboxed agent stops its container",
-      "assertions": ["a timed out agent container no longer exists"],
+      "assertions": [
+        "a timed out agent container no longer exists"
+      ],
       "portable": "ralph/agent.test.js \"a timed out agent stops its container\"",
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"stops timed out steps and preserves journals\"",
+      "status": "integration-mapped"
     },
     {
       "source": "agent.test.js.txt",
       "test": "finished sandboxed agent leaves no container",
-      "assertions": ["a background process left by the agent does not keep its container alive"],
+      "assertions": [
+        "a background process left by the agent does not keep its container alive"
+      ],
       "portable": null,
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"removes background and active containers on controller exit\"",
+      "status": "integration-mapped"
     },
     {
       "source": "agent.test.js.txt",
       "test": "controller exit stops active agent containers",
-      "assertions": ["exit and SIGINT of the controller remove every running agent container"],
+      "assertions": [
+        "exit and SIGINT of the controller remove every running agent container"
+      ],
       "portable": null,
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"removes background and active containers on controller exit\"",
+      "status": "integration-mapped"
     },
     {
       "source": "agent.test.js.txt",
       "test": "sandboxed agent cannot write .git (no fsmonitor or hooks for host git)",
-      "assertions": ["git config and hooks in the mounted .git cannot be written", "the working tree stays writable"],
+      "assertions": [
+        "git config and hooks in the mounted .git cannot be written",
+        "the working tree stays writable"
+      ],
       "portable": null,
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"enforces agent and git filesystem boundaries\"",
+      "status": "integration-mapped"
     },
     {
       "source": "workspace.test.js.txt",
       "test": "runProjectGate runs inside sandbox without network",
-      "assertions": ["each gate command runs in a container whose only interface is loopback"],
+      "assertions": [
+        "each gate command runs in a container whose only interface is loopback"
+      ],
       "portable": "ralph/core.test.js \"always applies sandbox policy to executable phases\"",
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"runs agent install and gate inside sandbox\"; \"isolates real gate network and git directory\"",
+      "status": "integration-mapped"
     },
     {
       "source": "workspace.test.js.txt",
       "test": "dependency install runs inside sandbox",
-      "assertions": ["install runs in a container through the proxy with the install env", "dependency sync updates the lock file in the clone"],
+      "assertions": [
+        "install runs in a container through the proxy with the install env",
+        "dependency sync updates the lock file in the clone"
+      ],
       "portable": "ralph/workspace.test.js \"runs profile dependency sync for changed manifest\"",
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"installs and syncs real npm through fixture registry\"; \"runs agent install and gate inside sandbox\"",
+      "status": "integration-mapped"
     },
     {
       "source": "workspace.test.js.txt",
       "test": "a failed sandbox install keeps its full output in a log named in the error",
-      "assertions": ["the package manager's real error is in the log named by the failure"],
+      "assertions": [
+        "the package manager's real error is in the log named by the failure"
+      ],
       "portable": "ralph/workspace.test.js \"dependency sync failure blocks before final gate\"",
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"keeps real registry failure output in named install log\"",
+      "status": "integration-mapped"
     },
     {
       "source": "workspace.test.js.txt",
       "test": "a gate check cannot plant anything in .git",
-      "assertions": ["a gate command cannot write a hook into the clone's .git"],
+      "assertions": [
+        "a gate command cannot write a hook into the clone's .git"
+      ],
       "portable": null,
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"isolates real gate network and git directory\"",
+      "status": "integration-mapped"
     },
     {
       "source": "run.test.js.txt",
       "test": "startup removes leftover ralph containers",
-      "assertions": ["containers and networks with this consumer's label are removed at startup"],
+      "assertions": [
+        "containers and networks with this consumer's label are removed at startup"
+      ],
       "portable": "ralph/run.test.js \"uses local runs root for consumer state\"",
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"cleans only current consumer leftovers at startup\"",
+      "status": "integration-mapped"
     },
     {
       "source": "run.test.js.txt",
       "test": "startup leaves unlabelled containers running",
-      "assertions": ["unlabelled containers and containers of another consumer keep running"],
+      "assertions": [
+        "unlabelled containers and containers of another consumer keep running"
+      ],
       "portable": null,
-      "status": "not-run"
+      "integration": "test/integration/ralph-sandbox.test.js \"cleans only current consumer leftovers at startup\"; \"leaves unrelated resources running without owned leftovers\"",
+      "status": "integration-mapped"
     }
   ]
 }
