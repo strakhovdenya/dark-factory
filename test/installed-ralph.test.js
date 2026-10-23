@@ -92,7 +92,8 @@ const npmCli = () => {
 };
 
 const pack = (destination) => {
-  const env = { ...process.env, npm_config_offline: 'true', npm_config_audit: 'false', npm_config_fund: 'false' };
+  const inherited = Object.entries(process.env).filter(([name]) => !/^npm_config_/i.test(name));
+  const env = { ...Object.fromEntries(inherited), npm_config_offline: 'true', npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false' };
   const result = childProcess.spawnSync(process.execPath, [npmCli(), 'pack', '--json', '--ignore-scripts', '--pack-destination', destination], { cwd: REPO_ROOT, env, encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`npm pack failed (${result.status}): ${result.stderr}`);
   const [report] = JSON.parse(result.stdout);
@@ -100,14 +101,17 @@ const pack = (destination) => {
 };
 
 // The full runtime closure of the packed `dependencies`, copied from the packages already installed
-// in this checkout (no registry). The lock must agree with the packed manifest.
+// in this checkout (no registry). The lock must agree with the packed manifest. An optional
+// package not installed for this platform is skipped, as npm skips it.
 const prepareRuntime = (manifest, runtimeDir) => {
   const lock = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package-lock.json'), 'utf8'));
   assert.deepEqual(lock.packages[''].dependencies, manifest.dependencies, 'package-lock.json does not match the packed dependencies');
   const closure = runtimeClosure(lock, manifest.dependencies);
   for (const key of closure) {
     const source = path.join(REPO_ROOT, key);
-    if (!fs.existsSync(path.join(source, 'package.json'))) throw new Error(`runtime dependency ${key} is not installed; run npm ci first`);
+    const isInstalled = fs.existsSync(path.join(source, 'package.json'));
+    if (!isInstalled && lock.packages[key].optional) continue;
+    if (!isInstalled) throw new Error(`runtime dependency ${key} is not installed; run npm ci first`);
     fs.cpSync(source, path.join(runtimeDir, key), { recursive: true });
   }
   return closure;
@@ -247,12 +251,14 @@ const packageOf = (run) => Object.fromEntries(Object.entries(run.before).filter(
 
 const assertDone = (run) => {
   assert.equal(run.status, 0, run.stderr);
+  assert.ok(run.state?.lastResult, `no issue result: ${run.stdout}${run.stderr}`);
   const { issue, status, pr } = run.state.lastResult;
   assert.deepEqual({ issue, status, pr }, { issue: ISSUE_ID, status: 'done', pr: PR_URL }, run.stdout);
 };
 
 const assertBlocked = (run, reasonPattern) => {
   assert.equal(run.status, 0, run.stderr);
+  assert.ok(run.state?.lastResult, `no issue result: ${run.stdout}${run.stderr}`);
   assert.equal(run.state.lastResult.status, 'blocked', run.stdout);
   assert.match(run.state.lastResult.reason, reasonPattern);
   assert.deepEqual(ghCalls(run, 'pr', 'create'), []);
@@ -512,8 +518,9 @@ describe('installed Ralph from the packed tarball', () => {
     assert.ok(!fs.existsSync(path.join(run.runDir, 'node_modules', 'ajv')));
     const [setup] = sandboxOf(run, 'setup');
     assert.notEqual(setup.status, 0);
-    const logPath = /full output: (.+)$/m.exec(run.state.lastResult.reason)[1].trim();
-    assert.match(fs.readFileSync(logPath, 'utf8'), /Cannot find module 'ajv/);
+    const logMatch = /full output: (.+)$/m.exec(run.state.lastResult.reason);
+    assert.ok(logMatch, run.state.lastResult.reason);
+    assert.match(fs.readFileSync(logMatch[1].trim(), 'utf8'), /Cannot find module 'ajv/);
     assertLoadedFrom(modulesOf(run, 'setup'), path.join(run.runDir, 'node_modules'));
     assert.deepEqual(eventsOf(run, 'agent'), []);
     assert.deepEqual(run.after, run.before);

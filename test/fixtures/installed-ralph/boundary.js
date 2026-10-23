@@ -101,7 +101,12 @@ const sandboxRun = (run) => {
     return result;
   }
   if (run.network !== 'none') {
-    installInClone(runDir);
+    try {
+      installInClone(runDir);
+    } catch (error) {
+      log({ ...entry, kind: 'install', status: 1 });
+      return spawnResult(1, '', `install failed: ${error.message}\n`);
+    }
     log({ ...entry, kind: 'install' });
     return spawnResult(0, 'installed\n');
   }

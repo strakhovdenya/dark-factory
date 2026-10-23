@@ -12,6 +12,9 @@ const zlib = require('node:zlib');
 const BLOCK = 512;
 const PACKAGE_PREFIX = 'package/';
 
+// Parsed entries by tarball path: one delivery is unpacked many times in a test run.
+const parsed = new Map();
+
 const textField = (header, start, length) => {
   const raw = header.subarray(start, start + length).toString('utf8');
   const end = raw.indexOf('\0');
@@ -25,6 +28,11 @@ const textField = (header, start, length) => {
  * @returns {{ name: string, type: string, body: Buffer }[]}
  */
 const readTarball = (tarball) => {
+  if (!parsed.has(tarball)) parsed.set(tarball, parseTarball(tarball));
+  return parsed.get(tarball);
+};
+
+const parseTarball = (tarball) => {
   const data = zlib.gunzipSync(fs.readFileSync(tarball));
   const entries = [];
   let longName = null;
