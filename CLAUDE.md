@@ -12,13 +12,13 @@ This repo is developed by its owner in an interactive Claude Code session. Ralph
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `bin/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | **yes** |
+| `bin/`, `doctor/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | **yes** |
 | `.claude/` | Tooling for developing the factory only (its own scripts, settings, skills, agents) | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repo | no |
 
 Rules of placement:
-- Something a project must receive → package dirs (`bin/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/`).
+- Something a project must receive → package dirs (`bin/`, `doctor/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/`).
 - Something only used while developing the factory → `.claude/`. Never put package sources there, and never let the factory's own skills/agents reach projects.
 - `.claude/` and `.factory/` are never part of the package.
 
@@ -27,6 +27,8 @@ Rules of placement:
 - `npm test` — the test command of every change (`node --test`). Tests must pass on **Windows and Linux**, **without network**, **without Docker** and **without a real AI** (stub the agent/model). CI jobs `Test (Linux)` and `Test (Windows)` run it on every PR.
 - Portable tests (`ralph/**/*.test.js`) replace processes at the `child_process` boundary and need no Docker. Tests that need a real Docker engine live in `test/integration/`, are not part of `npm test` and are never replaced by a skip that reports success.
 - The one exception to "a single test command": the Ralph Docker integration, `npm run prepare:ralph:sandbox` (builds the images; the only step that downloads) and then `npm run test:ralph:sandbox` (runs the suite on the prepared images, Linux host with a Linux Docker engine, stub agent, no AI). CI job `Ralph sandbox integration` runs both on every PR. See `ralph/README.md`.
+
+- `factory doctor [<project-path>]` (`bin/doctor.js`, `bin.factory`; checks in `doctor/`) — read-only check that a project is connected to the factory: working tree plus GitHub labels, secret name and variables of that project. It fixes nothing and is not part of the verdict. See `README.md`.
 
 ## Core invariants (do not break)
 

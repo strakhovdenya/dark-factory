@@ -15,18 +15,12 @@ const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
 const { REPO_ROOT, installFactoryPackage } = require('../test/helpers/factory-package');
 const { BASE_SKILLS } = require('../profile/skill-rules');
 const { markerPath } = require('./skill-marker');
+const { HOOK_ENTRIES, commandFor } = require('./entries');
 
 const README = path.join(__dirname, 'README.md');
 const SESSION_PREFIX = `settings-entry-test-${process.pid}`;
 const COMMIT = `${['g', 'it'].join('')} commit -m x`;
-const EXPECTED = [
-  ['PreToolUse', 'Bash', 'closure-gate.js', 'gate'],
-  ['PreToolUse', 'mcp__github__issue_write', 'closure-gate.js', 'gate'],
-  ['PreToolUse', 'Write|Edit', 'skill-gate.js', 'gate'],
-  ['PostToolUse', 'Skill', 'skill-marker.js', 'helper'],
-  ['PostToolUse', 'Write|Edit', 'lint.js', 'helper'],
-  ['PostToolUse', 'Write|Edit', 'typecheck.js', 'helper'],
-];
+const EXPECTED = HOOK_ENTRIES.map(({ event, matcher, script, kind }) => [event, matcher, script, kind]);
 
 let counter = 0;
 const newSession = () => `${SESSION_PREFIX}-${counter++}`;
@@ -107,6 +101,7 @@ test('installed README entries resolve hooks and preserve gate decisions', (t) =
   for (const [index, [, , , kind]] of EXPECTED.entries()) {
     assert.equal(entries[index].type, 'command');
     assert.ok(entries[index].command.endsWith(kind === 'gate' ? ' || exit 2' : ' || true'), entries[index].command);
+    assert.equal(entries[index].command, commandFor(HOOK_ENTRIES[index]));
   }
 
   for (const fixture of FIXTURE_PROFILES) {

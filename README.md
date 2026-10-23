@@ -10,7 +10,7 @@ Projects install a pinned release of the package and supply project-specific val
 
 | Path | Role | Ships to projects |
 |---|---|---|
-| `bin/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | yes |
+| `bin/`, `doctor/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | yes |
 | `.claude/` | Tooling for developing the factory only | no |
 | `.factory/profile.json` | The factory's own project profile | no |
 | `.github/` | CI of this repository | no |
@@ -34,6 +34,23 @@ Git. Setup never changes tracked files, including `.gitignore`. The project must
 ```
 
 A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md).
+
+## Checking a project: `factory doctor`
+
+`factory doctor [<project-path>]` (`bin/doctor.js`, the `factory` command of the package; `dark-factory-setup` stays) checks that the factory is connected to a project and lists every problem it finds as `subject: reason`. It only reads: it fixes nothing, installs nothing, runs no `git fetch`, CI, Docker, Ralph or model, does not check branch protection and does not run commands from the project's settings. Setup is only *prepared* (the same plan `dark-factory-setup` checks), never applied.
+
+```sh
+node_modules/dark-factory/bin/doctor.js doctor            # the project the current directory belongs to
+node_modules/dark-factory/bin/doctor.js doctor ../other   # an explicit project
+```
+
+- **Project and branch.** Without an argument the root is the git root of the current directory (a subdirectory is fine); with `<project-path>` it is the git root of that path, and the files and every `gh` call (`label list`, `secret list`, `variable list`, run in that root) belong to it even when doctor is started from another repository. A missing path, a directory outside git or an unavailable `git` is an error (exit code 2) with no fallback to the package directory. The report names the checked root and the branch or `detached HEAD`.
+- **Missing installation.** The package checked is `<root>/node_modules/dark-factory`, never the running copy. When it is missing, run an available copy of doctor on the project: the report names the package as not installed.
+- **What is checked.** The profile (through `loadProfile`; names in `verifier.checks` against the core registry, an empty list stays empty); the five trusted configs `.github/verifier/{owners,required-checks,allowed-models,tampering-scan,risk-zones}.json` and an existing `issue-contract.overlay.json` with the parsers of the core (a missing overlay is fine); the labels `spec-approved`, `manual-verified`, `factory-cross-change`, `test-removal-approved`, the secret `OPENAI_API_KEY` (by name only, its value is never requested) and the variable `VERIFIER_MODEL`; the verifier wrapper (a job that calls the factory's reusable `acceptance-verifier.yml` by a full commit SHA with the same SHA in `with.factory-sha`; every checked wrapper pins one SHA); the six entries of the five hooks in `.claude/settings.json` (`hooks/entries.js`); the installed package, its hook scripts and the `dark-factory` release tag in the project's `package.json`; the skill and agent copies, their list and `.gitignore` exclusions.
+- **Conditional blocks.** With `ralph.enabled` the labels `ralph-blocked` and `labels.humanNeeded` are required (a missing profile field is a problem). With `judge.enabled` the label `labels.calibration`, the variable `CALIBRATION_JUDGE_MODEL`, the Calibration Judge wrapper, both `.github/calibration/` configs and the verifier wrapper at `.github/workflows/acceptance-verifier.yml` are required. The spec-approval wrapper is required when `verifier.checks` has `spec-approval`. With `allowed-model`, `VERIFIER_MODEL` must be in `allowed-models.json`; `CALIBRATION_JUDGE_MODEL` is compared with `.github/calibration/allowed-models.json` only, the lists are never mixed. A disabled block asks for none of this.
+- **Exit codes.** `0` no problems; `1` at least one problem, including a check that could not run (a failed `gh` call is reported as unavailable, not as a missing setting, and an invalid profile marks its dependent checks as not checked); `2` wrong usage, an unusable location, or a failure of doctor itself (nothing was verified).
+- **Limits.** Secrets and variables are the repository's own (`gh secret list`, `gh variable list` without `--org` or `--env`); wrappers are read as block-style YAML text (a `jobs:` block, `uses` and `with.factory-sha` as plain or quoted scalars), not with a YAML parser.
+- **Working tree, not CI.** Doctor looks at the local working tree. It does not prove the same files are on the default branch CI reads the trusted configs from, and it does not resolve the release tag to the pinned SHA (CI does).
 
 ## PRD and plan templates
 
