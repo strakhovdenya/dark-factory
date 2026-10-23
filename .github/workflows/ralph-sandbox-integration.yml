@@ -1,0 +1,34 @@
+name: Ralph sandbox integration
+
+# Real Docker integration of the Ralph sandbox and controller with a stub agent. Separate from
+# CI: `npm test` stays without Docker, network or AI. No AI secrets are used.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer head of the same PR supersedes a run in progress.
+concurrency:
+  group: ralph-sandbox-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ralph-sandbox-integration:
+    name: Ralph sandbox integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Prepare images
+        run: npm run prepare:ralph:sandbox
+      - name: Run integration
+        run: npm run test:ralph:sandbox
