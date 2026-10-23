@@ -60,7 +60,11 @@ Resolve the identifiers from GitHub, never from memory: the project node id and 
 
 ### Epic base branches / stacked work
 
-For a multi-task epic, the base branch is `task/ISSUE-<tracking-issue-n>-<epic-short-name>-base`, where the tracking issue number is resolved from the Issues created for the epic.
+For a multi-task epic, the base branch is built by the existing `branchNameFor` of the installed package (`profile/branch.js`) from the profile: `branchNameFor(profile.branchTemplate, <tracking-issue-n>, "<epic-short-name>-base")`, where the tracking issue number is resolved from the Issues created for the epic and the slug is the short epic name with the `-base` suffix. Do not assemble the name by hand:
+
+```sh
+node -e "const [root, issue, name] = process.argv.slice(1); const p = root + '/node_modules/dark-factory/'; const { loadProfile } = require(p + 'profile/load'); const { branchNameFor } = require(p + 'profile/branch'); console.log(branchNameFor(loadProfile(root).branchTemplate, Number(issue), name + '-base'))" "<root>" <tracking-issue-n> "<epic-short-name>"
+```
 
 Before opening sub-task PRs into an epic base branch, ensure that base branch has the same required-status-check protection as the default branch.
 
