@@ -2,14 +2,14 @@
 'use strict';
 
 /**
- * Bootstrap postinstall: copies skills of the `metaskills` package into <root>/.claude/skills/<name>.
+ * Bootstrap (run by hand, no longer a postinstall): copies skills of the `metaskills` package into <root>/.claude/skills/<name>.
  *
  * Claude Code looks for skills at .claude/skills/<name>/SKILL.md, while the package keeps them in
  * node_modules/metaskills/skills/<name>. Symlinks and junctions do not fit (they do not list as
  * directories and do not survive a clone), so plain directories are copied. The copies are git-ignored.
  * The tracked .claude/skills/modern-javascript is not in SKILLS and is never touched.
  *
- * Never fails the install: a missing package is skipped silently.
+ * Never fails: a missing package is skipped silently.
  */
 const fs = require('node:fs');
 const path = require('node:path');

@@ -4,7 +4,8 @@
 // Lays out the factory's skills and agents in a consumer repository as plain copies, keeps a list
 // of the copies it owns (.claude/.factory-installed.json) and updates or removes only those.
 // Public command: `dark-factory-setup --consumer-root <path>`; the package's postinstall runs the
-// same file with no argument and the consumer is found from INIT_CWD.
+// same file with no argument and the consumer is found from INIT_CWD. In the factory's own package
+// (its sources and npm's preparation of it) the postinstall lays out nothing.
 //
 // The whole plan (profile, sources, list of copies, tracked files, Git exclusions, conflicts) is
 // checked before the first write. Setup never creates, changes or deletes a tracked file, never
@@ -400,28 +401,68 @@ const applyPlan = (root, { wanted, retired, listed }) => {
   writeManifest(root, finalCopies);
 };
 
-// The factory's own repository keeps its bootstrap until it runs on a release: copies of the
-// working sources of skills/ and agents/ are never laid out there.
-const isOwnRepository = (root, packageRoot) => {
-  if (root !== realPath(packageRoot)) return false;
-  return readJson(path.join(packageRoot, 'package.json'), 'package.json').name === OWN_PACKAGE_NAME;
+// --- the factory's own package ---
+
+const isOwnPackage = (packageRoot) => readJson(path.join(packageRoot, 'package.json'), 'package.json').name === OWN_PACKAGE_NAME;
+
+const realPathOrNull = (target) => {
+  try {
+    return realPath(target);
+  } catch {
+    return null;
+  }
+};
+
+const packageNameAt = (dir) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name;
+  } catch {
+    return undefined;
+  }
+};
+
+// npm also runs this postinstall where the factory package is not installed into a project:
+// - the root postinstall of the factory's own sources (`npm install` there): INIT_CWD is the package
+//   root or a directory of its repository;
+// - npm's temporary preparation of the factory as a git dependency (an `npm install` in the
+//   unpacked tag): INIT_CWD is that package root, which may have no .git;
+// - inside that preparation (npm marks it with _PACOTE_NO_PREPARE_), the factory's own pinned
+//   release installed as a dependency of the prepared tree: INIT_CWD is the prepared dark-factory
+//   tree and this package is its node_modules/dark-factory.
+// None of them lays out copies or needs a profile. The factory itself gets its copies from the
+// postinstall of its installed release, like any project; every other start is a consumer.
+// Returns the start directory of such a run, or null.
+const ownLifecycleStart = ({ env, packageRoot }) => {
+  const start = env.INIT_CWD ? realPathOrNull(env.INIT_CWD) : null;
+  if (!start || !isOwnPackage(packageRoot)) return null;
+  const own = realPath(packageRoot);
+  if (start === own) return start;
+  if (!env._PACOTE_NO_PREPARE_ || packageNameAt(start) !== OWN_PACKAGE_NAME) return null;
+  return realPathOrNull(path.join(start, 'node_modules', OWN_PACKAGE_NAME)) === own ? start : null;
+};
+
+const skipOwn = (root, log) => {
+  log(`dark-factory-setup: postinstall of the dark-factory package itself, no copies laid out (${root})`);
+  return { isOwn: true, root, installed: [], removed: [] };
 };
 
 /**
  * @param {{ consumerRoot?: string, env?: NodeJS.ProcessEnv, packageRoot?: string, log?: (line: string) => void }} [options]
  */
 const runSetup = ({ consumerRoot, env = process.env, packageRoot = PACKAGE_ROOT, log = console.log } = {}) => {
+  const isImplicit = consumerRoot === undefined;
+  const ownStart = isImplicit ? ownLifecycleStart({ env, packageRoot }) : null;
+  if (ownStart) return skipOwn(ownStart, log);
   const root = resolveConsumerRoot({ consumerRoot, env });
-  if (isOwnRepository(root, packageRoot)) {
-    const script = path.join(packageRoot, '.claude', 'scripts', 'setup-metaskills.js');
-    childProcess.execFileSync(process.execPath, [script, root], { stdio: 'inherit' });
-    return { isBootstrap: true, root, installed: [], removed: [] };
+  if (root === realPath(packageRoot) && isOwnPackage(packageRoot)) {
+    if (isImplicit) return skipOwn(root, log);
+    throw new SetupError(`--consumer-root "${consumerRoot}" is the repository of this package; its copies come only from an installed release (node_modules/dark-factory)`);
   }
   const plan = buildPlan({ root, packageRoot });
   applyPlan(root, plan);
   const installed = plan.wanted.map((item) => item.destination);
   log(`dark-factory-setup: ${installed.length} copies installed, ${plan.retired.length} removed (${root})`);
-  return { isBootstrap: false, root, installed, removed: plan.retired };
+  return { isOwn: false, root, installed, removed: plan.retired };
 };
 
 const main = (argv = process.argv.slice(2), env = process.env) => {
