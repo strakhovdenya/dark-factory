@@ -59,7 +59,7 @@ The factory uses its own **pinned release** (git tag `vX.Y.Z`), installed like i
 
 ## Recovery
 
-- **Fresh clone:** run `npm install` first (restores the pinned release, including hooks and copies of skills), then work.
+- **Fresh clone:** run `npm install` first (restores the pinned release, including hooks and copies of skills), then work. Until the factory pins its own release (#27), `npm install` lays out no copies: run `node .claude/scripts/setup-metaskills.js` once, in an ordinary terminal, for the metaskills copies the development hooks of `.claude/` require.
 - **Broken pinned release** (a hook gate blocks Write/Edit, so files cannot be edited): do not try to edit files. Use Bash or your own terminal and roll the pinned tag back to the previous release with an npm or git command (reinstall the previous `vX.Y.Z`, or check out the previous tag). Then fix the problem in the working copy, cut a new release, and move the pin forward.
 - The exact rollback command depends on the installation mechanism chosen in the task "Factory on its own release"; that task refines this section.
 

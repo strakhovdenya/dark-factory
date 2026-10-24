@@ -1,12 +1,17 @@
 'use strict';
 
 // Real file operations and real temporary git repositories; the setup runs as a separate Node
-// process from an "installed" copy of this package. No network, no Docker, no model.
+// process from an "installed" copy of this package. The npm lifecycle tests run the real npm on a
+// local git tag, offline. No network, no Docker, no model.
 
+const childProcess = require('node:child_process');
 const test = require('node:test');
+const { after } = test;
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { FIXTURE_PROFILES } = require('../test/helpers/profiles');
 const { tempDir, isolateGit, gitIn, writeFiles } = require('../test/helpers/ralph');
 const { copyPackageEntries, skillNames, gitignoreText, baseDestinations, installFactoryPackage, runSetupScript, REPO_ROOT } = require('../test/helpers/factory-package');
@@ -416,29 +421,244 @@ scenarioTest('rejects destination resolving outside consumer', (t, fixture) => {
   assert.deepEqual(snapshot(outside), outsideBefore);
 });
 
-test('does not lay out copies from sources in own repository', async (t) => {
-  for (const fixture of FIXTURE_PROFILES) {
-    await t.test(fixture, () => {
-      isolateGit(t);
-      const scratch = tempDir(t, 'setup-own-');
-      const bootstrap = "require('node:fs').writeFileSync(require('node:path').join(process.argv[2], 'bootstrap-called.txt'), process.argv[2]);\n";
-      const fakeBootstrap = { '.claude/scripts/setup-metaskills.js': bootstrap, '.factory/profile.json': profileOf(fixture), 'package.json': JSON.stringify({ name: 'dark-factory', version: '0.0.0' }) };
+// --- the factory's own package ---
 
-      const own = path.join(scratch, 'own');
-      copyPackageEntries(own);
-      writeFiles(own, fakeBootstrap);
-      gitIn(own, 'init', '-q', '-b', 'main');
-      const result = runSetupScript(path.join(own, 'bin', 'setup.js'), { args: ['--consumer-root', own], cwd: own });
-      ok(result);
-      assert.equal(fs.readFileSync(path.join(own, 'bootstrap-called.txt'), 'utf8'), fs.realpathSync.native(own));
-      assert.ok(!fs.existsSync(path.join(own, '.claude', 'skills')), 'no copy from skills/ sources');
-      assert.ok(!fs.existsSync(path.join(own, MANIFEST)));
+const BOOTSTRAP_MARKER = 'bootstrap-called.txt';
+// A stand-in for the old bootstrap: if anything still ran it, it would leave a marker.
+const FAKE_BOOTSTRAP = `require('node:fs').writeFileSync(require('node:path').join(process.argv[2] || process.cwd(), '${BOOTSTRAP_MARKER}'), 'called');\n`;
+const NO_COPIES = 'no copies laid out';
+const PREPARATION_ENV = { _PACOTE_NO_PREPARE_: 'git+file:///prepared/dark-factory#0000000000000000000000000000000000000000' };
 
-      const scenario = makeScenario(t, fixture, { files: { 'package.json': JSON.stringify({ name: 'dark-factory' }) } });
-      writeFiles(scenario.pkg.packageRoot, fakeBootstrap);
-      ok(scenario.run());
-      assert.ok(!fs.existsSync(path.join(scenario.project, 'bootstrap-called.txt')));
-      assert.deepEqual(scenario.manifest().copies, baseDestinations());
-    });
+/** A tree of the factory sources: package directories, the real package.json, the old bootstrap file, an own tool and a profile. */
+const ownTree = (dir, fixture, { git = true } = {}) => {
+  copyPackageEntries(dir);
+  writeFiles(dir, { '.claude/scripts/setup-metaskills.js': FAKE_BOOTSTRAP, '.claude/skills/release/SKILL.md': 'own tool\n', '.factory/profile.json': profileOf(fixture), '.gitignore': gitignoreText() });
+  if (git) {
+    gitIn(dir, 'init', '-q', '-b', 'main');
+    gitIn(dir, 'add', '-A');
+    gitIn(dir, 'commit', '-qm', 'sources');
+  }
+  return dir;
+};
+
+/** The run succeeded and left the tree exactly as it was: no copy, no list of copies, no bootstrap. */
+const assertOwnSkip = (result, dir, before) => {
+  ok(result);
+  assert.ok(result.stdout.includes(NO_COPIES), result.stdout);
+  assert.deepEqual(snapshot(dir), before, 'nothing changed');
+  assert.ok(!fs.existsSync(path.join(dir, MANIFEST)));
+  assert.ok(!fs.existsSync(path.join(dir, BOOTSTRAP_MARKER)), 'the old bootstrap was not called');
+};
+
+scenarioTest('own postinstall skips copies including git preparation', (t, fixture) => {
+  isolateGit(t);
+  const scratch = tempDir(t, 'setup-own-');
+
+  const sources = ownTree(path.join(scratch, 'sources'), fixture);
+  const sourcesSetup = path.join(sources, 'bin', 'setup.js');
+  const before = snapshot(sources);
+  for (const start of [sources, path.join(sources, 'verifier')]) {
+    assertOwnSkip(runSetupScript(sourcesSetup, { cwd: sources, env: { INIT_CWD: start } }), sources, before);
+  }
+
+  // npm prepares a git dependency by an `npm install` in the unpacked tag: INIT_CWD is the package root, no .git.
+  const prepared = ownTree(path.join(scratch, 'prepared'), fixture, { git: false });
+  assert.ok(!fs.existsSync(path.join(prepared, '.git')));
+  const preparedBefore = snapshot(prepared);
+  assertOwnSkip(runSetupScript(path.join(prepared, 'bin', 'setup.js'), { cwd: prepared, env: { INIT_CWD: prepared, ...PREPARATION_ENV } }), prepared, preparedBefore);
+
+  // In that preparation the tree's own pinned release is installed as its dependency and runs its postinstall.
+  for (const git of [false, true]) {
+    const tree = ownTree(path.join(scratch, `prepared-with-release-${git}`), fixture, { git });
+    const release = installFactoryPackage(path.join(tree, 'node_modules'));
+    const treeBefore = snapshot(tree);
+    const releaseBefore = snapshot(release.packageRoot, { skip: [] });
+    assertOwnSkip(runSetupScript(release.setupScript, { cwd: release.packageRoot, env: { INIT_CWD: tree, ...PREPARATION_ENV } }), tree, treeBefore);
+    assert.deepEqual(snapshot(release.packageRoot, { skip: [] }), releaseBefore);
   }
 });
+
+/** A consumer named like the factory, with the installed package in its own node_modules/dark-factory. */
+const namesakeConsumer = (t, fixture, { git = true, profile = profileOf(fixture) } = {}) => {
+  isolateGit(t);
+  const project = path.join(tempDir(t, 'setup-namesake-'), 'dark-factory');
+  const files = { 'package.json': JSON.stringify({ name: 'dark-factory', version: '0.0.0', devDependencies: { 'dark-factory': '*' } }), '.gitignore': gitignoreText(), 'README.md': 'neutral\n' };
+  writeFiles(project, profile === null ? files : { ...files, '.factory/profile.json': profile });
+  if (git) {
+    gitIn(project, 'init', '-q', '-b', 'main');
+    gitIn(project, 'add', '-A');
+    gitIn(project, 'commit', '-qm', 'init');
+  }
+  const pkg = installFactoryPackage(path.join(project, 'node_modules'));
+  const run = (options = {}) => runSetupScript(pkg.setupScript, { cwd: pkg.packageRoot, env: { INIT_CWD: project, _PACOTE_NO_PREPARE_: '' }, ...options });
+  return { project, pkg, run, state: () => snapshot(project) };
+};
+
+scenarioTest('own postinstall does not bypass consumer validation', (t, fixture) => {
+  /** @type {[string, string, () => any][]} */
+  const cases = [
+    ['profile missing', 'Profile not found', () => namesakeConsumer(t, fixture, { profile: null })],
+    ['profile invalid', 'unknownField: unknown field', () => namesakeConsumer(t, fixture, { profile: profileOf(fixture, (p) => (p.unknownField = true)) })],
+  ];
+  for (const [label, mention, arrange] of cases) {
+    const consumer = arrange();
+    const before = consumer.state();
+    const result = consumer.run();
+    assert.notEqual(result.status, 0, label);
+    assert.ok(result.stderr.includes(mention), `${label}: ${result.stderr}`);
+    assert.deepEqual(consumer.state(), before, label);
+  }
+
+  const outside = namesakeConsumer(t, fixture, { git: false });
+  const before = outside.state();
+  for (const options of [{ args: ['--consumer-root', outside.project] }, {}]) {
+    const result = outside.run(options);
+    assert.notEqual(result.status, 0, JSON.stringify(options));
+    assert.ok(result.stderr.includes('is not inside a git repository'), result.stderr);
+  }
+  assert.deepEqual(outside.state(), before);
+
+  const sources = ownTree(path.join(tempDir(t, 'setup-own-'), 'sources'), fixture);
+  const sourcesBefore = snapshot(sources);
+  const explicit = runSetupScript(path.join(sources, 'bin', 'setup.js'), { args: ['--consumer-root', sources], cwd: sources });
+  assert.notEqual(explicit.status, 0);
+  assert.ok(explicit.stderr.includes('copies come only from an installed release'), explicit.stderr);
+  assert.deepEqual(snapshot(sources), sourcesBefore);
+});
+
+scenarioTest('release setup still installs in both consumer forms', (t, fixture) => {
+  for (const isExplicit of [false, true]) {
+    const consumer = namesakeConsumer(t, fixture);
+    const run = () => consumer.run(isExplicit ? { args: ['--consumer-root', consumer.project] } : {});
+    const result = run();
+    ok(result);
+    assert.ok(!result.stdout.includes(NO_COPIES), result.stdout);
+    const manifest = JSON.parse(fs.readFileSync(path.join(consumer.project, MANIFEST), 'utf8'));
+    assert.deepEqual(manifest, { format_version: 1, copies: baseDestinations() });
+    for (const name of ['issues', 'prd']) {
+      assert.deepEqual(snapshot(path.join(consumer.project, '.claude/skills', name)), snapshot(path.join(consumer.pkg.packageRoot, 'skills', name)), name);
+    }
+    assert.equal(fs.readFileSync(path.join(consumer.project, '.claude/agents/verify.md'), 'utf8'), fs.readFileSync(path.join(consumer.pkg.packageRoot, 'agents', 'verify.md'), 'utf8'));
+    assert.equal(gitIn(consumer.project, 'status', '--porcelain'), '', 'only ignored files were written');
+    const before = consumer.state();
+    ok(run());
+    assert.deepEqual(consumer.state(), before, 'a repeated run keeps the set');
+  }
+});
+
+// --- npm lifecycle of the factory on its own pinned release, offline ---
+
+const npmCli = () => {
+  const candidates = [
+    process.env.npm_execpath,
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+  const found = candidates.find((file) => file && path.basename(file) === 'npm-cli.js' && fs.existsSync(file));
+  if (!found) throw new Error('npm-cli.js of the running Node is not found; npm cannot run');
+  return found;
+};
+
+// npm needs no registry and no cache: the trees below have no registry dependencies (see `hermeticManifest`).
+// ajv and minimatch, which the setup of the installed package requires, come from this repository.
+// The cache is empty and private, so a hidden registry dependency fails here instead of passing on a warm machine.
+const npmCache = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-npm-cache-'));
+after(() => fs.rmSync(npmCache, { recursive: true, force: true }));
+
+const runNpm = (cwd, args) => {
+  const inherited = Object.entries(process.env).filter(([name]) => !/^(npm_.*|init_cwd|node_path|node_options|node_test_context|_pacote_no_prepare_)$/i.test(name));
+  const env = { ...Object.fromEntries(inherited), NODE_PATH: path.join(REPO_ROOT, 'node_modules'), npm_config_cache: npmCache, npm_config_offline: 'true', npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false', npm_config_foreground_scripts: 'true' };
+  const result = childProcess.spawnSync(process.execPath, [npmCli(), ...args], { cwd, env, encoding: 'utf8' });
+  return { status: result.status, output: `${result.stdout}\n${result.stderr}` };
+};
+
+const RELEASE_ISSUES = 'issues skill of the release\n';
+const RELEASE_VERIFY = 'verify agent of the release\n';
+const WORKING_ISSUES = 'issues skill of the working copy\n';
+const WORKING_VERIFY = 'verify agent of the working copy\n';
+
+// Neither tree may need a registry: no dev tooling, no lock file and no registry dependencies. The
+// package under test is pinned as a git tag, and metaskills (the only runtime source of the base set)
+// is a `file:` dependency of the factory tree, so npm links it from this repository's node_modules.
+const hermeticManifest = (dir, { dependencies = {}, devDependencies = {} } = {}) => {
+  const file = path.join(dir, 'package.json');
+  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, `${JSON.stringify({ ...manifest, dependencies, devDependencies }, null, 2)}
+`);
+};
+
+/**
+ * A local release (a git repository of the package with tag v0.1.0) and a factory working copy
+ * that pins it as devDependency `dark-factory`; skills/issues and agents/verify of the working copy
+ * differ from the release.
+ */
+const makeOwnFactory = (t, fixture) => {
+  isolateGit(t);
+  const scratch = tempDir(t, 'setup-lifecycle-');
+  const release = ownTree(path.join(scratch, 'release'), fixture, { git: false });
+  hermeticManifest(release);
+  writeFiles(release, { 'skills/issues/SKILL.md': RELEASE_ISSUES, 'agents/verify.md': RELEASE_VERIFY });
+  gitIn(release, 'init', '-q', '-b', 'main');
+  gitIn(release, 'add', '-A');
+  gitIn(release, 'commit', '-qm', 'release');
+  gitIn(release, 'tag', 'v0.1.0');
+
+  const factory = ownTree(path.join(scratch, 'factory'), fixture, { git: false });
+  hermeticManifest(factory, {
+    dependencies: { metaskills: `file:${path.join(REPO_ROOT, 'node_modules', 'metaskills').replaceAll(path.sep, '/')}` },
+    devDependencies: { 'dark-factory': `git+${pathToFileURL(release).href}#v0.1.0` },
+  });
+  writeFiles(factory, { 'skills/issues/SKILL.md': WORKING_ISSUES, 'agents/verify.md': WORKING_VERIFY });
+  gitIn(factory, 'init', '-q', '-b', 'main');
+  gitIn(factory, 'add', '-A');
+  gitIn(factory, 'commit', '-qm', 'working copy');
+  return { factory, installed: path.join(factory, 'node_modules', 'dark-factory') };
+};
+
+/** The copies are the release's, laid out by the installed package; the root postinstall changed nothing. */
+const assertReleaseCopies = ({ factory, installed }, output) => {
+  assert.equal(fs.readFileSync(path.join(installed, 'skills/issues/SKILL.md'), 'utf8'), RELEASE_ISSUES, 'the dependency is the release');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(factory, MANIFEST), 'utf8')), { format_version: 1, copies: baseDestinations() });
+  assert.equal(fs.readFileSync(path.join(factory, '.claude/skills/issues/SKILL.md'), 'utf8'), RELEASE_ISSUES);
+  assert.equal(fs.readFileSync(path.join(factory, '.claude/agents/verify.md'), 'utf8'), RELEASE_VERIFY);
+  assert.deepEqual(snapshot(path.join(factory, '.claude/skills/prd')), snapshot(path.join(installed, 'skills/prd')));
+  assert.equal(fs.readFileSync(path.join(factory, '.claude/skills/release/SKILL.md'), 'utf8'), 'own tool\n');
+  assert.ok(output.includes(`copies installed, 0 removed (${factory})`), output);
+  assert.ok(output.includes(`${NO_COPIES} (${factory})`), output);
+  for (const dir of [factory, installed]) assert.ok(!fs.existsSync(path.join(dir, BOOTSTRAP_MARKER)), `bootstrap called in ${dir}`);
+  const changed = gitIn(factory, 'status', '--porcelain').split('\n').filter(Boolean);
+  assert.deepEqual(changed, ['?? package-lock.json'], 'the lock npm wrote is the only change');
+};
+
+scenarioTest('npm install in factory does not take copies from working copy', (t, fixture) => {
+  const own = makeOwnFactory(t, fixture);
+  const install = runNpm(own.factory, ['install']);
+  assert.equal(install.status, 0, install.output);
+  assertReleaseCopies(own, install.output);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(own.factory, 'package-lock.json'), 'utf8')).packages['node_modules/dark-factory'].dev, true);
+
+  for (const destination of baseDestinations()) fs.rmSync(path.join(own.factory, destination), { recursive: true });
+  fs.rmSync(path.join(own.factory, MANIFEST));
+  const ci = runNpm(own.factory, ['ci']);
+  assert.equal(ci.status, 0, ci.output);
+  assertReleaseCopies(own, ci.output);
+});
+
+scenarioTest('failed release setup never falls back to working sources', (t, fixture) => {
+  const own = makeOwnFactory(t, fixture);
+  const install = runNpm(own.factory, ['install']);
+  assert.equal(install.status, 0, install.output);
+  writeFiles(own.factory, { '.factory/profile.json': profileOf(fixture, (p) => (p.unknownField = true)) });
+  const before = snapshot(path.join(own.factory, '.claude'));
+
+  const ci = runNpm(own.factory, ['ci']);
+  assert.notEqual(ci.status, 0, ci.output);
+  assert.ok(ci.output.includes('dark-factory-setup: '), ci.output);
+  assert.ok(ci.output.includes('unknownField: unknown field'), 'the release setup itself refused');
+  assert.ok(ci.output.includes(path.join('node_modules', 'dark-factory')), 'the refusing setup is the installed one');
+  assert.ok(!ci.output.includes(NO_COPIES), 'the root postinstall did not run after the refusal');
+  assert.deepEqual(snapshot(path.join(own.factory, '.claude')), before, 'existing copies were not rewritten');
+  assert.equal(fs.readFileSync(path.join(own.factory, '.claude/skills/issues/SKILL.md'), 'utf8'), RELEASE_ISSUES);
+  assert.ok(!fs.existsSync(path.join(own.factory, BOOTSTRAP_MARKER)));
+});
+
