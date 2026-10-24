@@ -353,6 +353,8 @@ Ralph is **off by default** (`ralph.enabled`). Skip this step to keep it off. It
    ```
 
    Add `.ralph/`, the runs root (when inside the project) and `.claude/settings.local.json` to `.gitignore`. `runsRoot` is mounted into containers and must be **outside the operator's home directory**; it is a personal setting and is not in the profile.
+
+   **Windows operators:** to run Ralph fast through WSL, add the optional `wsl` section and start it with `dark-factory-ralph-wsl`; see "Running on Windows through WSL" in [ralph/README.md](../ralph/README.md).
 4. **Credentials and engine.** Put `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in the environment of the process that starts the controller (never in the profile, argv or Git); it reaches the agent container by name only. Docker is required; there is no host fallback. The operator's own `git` and `gh` login is used for the project repository, which must have an `origin`.
 5. **Profile on the base.** The controller clones from `origin` and requires the clone's `.factory/profile.json` to equal the profile it started with, so commit the same profile to the branch Ralph clones from (the default branch, or the base of a stacked issue).
 6. **Run it** with the entry point of the installed package, from the root or from any subdirectory:
