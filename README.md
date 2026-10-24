@@ -61,6 +61,10 @@ node_modules/dark-factory/bin/doctor.js doctor ../other   # an explicit project
 - **Limits.** Secrets and variables are the repository's own (`gh secret list`, `gh variable list` without `--org` or `--env`); wrappers are read as block-style YAML text (a `jobs:` block, `uses` and `with.factory-sha` as plain or quoted scalars), not with a YAML parser.
 - **Working tree, not CI.** Doctor looks at the local working tree. It does not prove the same files are on the default branch CI reads the trusted configs from, and it does not resolve the release tag to the pinned SHA (CI does).
 
+## Moving to a newer release: `dark-factory-pin`
+
+`node node_modules/dark-factory/bin/pin.js vX.Y.Z [--dry-run] [--base <branch>] [--allow-older]` (`bin/pin.js`, the `dark-factory-pin` command of the package) moves a connected project to a published release tag in one command. Before it writes anything it checks that the tag is published in the repository named by the project's own pin, that the working tree is clean and contains the default branch, and that every workflow calling the factory release is pinned to one full commit SHA (a call at a tag or a branch is refused). An older tag than the pinned one needs `--allow-older`. Then it installs the tag (`npm install --ignore-scripts`, restoring `package.json` and the lock if npm fails or locks another commit), puts the tag's commit SHA into those workflows, adds the missing `.gitignore` lines of the new base set (lines are only added), runs the setup and doctor of the new release and checks that only those files changed (untracked files included). It never commits, opens a pull request or touches a tag, and nothing runs it automatically. What it leaves to you is in [docs/upgrading.md](docs/upgrading.md).
+
 ## PRD and plan templates
 
 The `prd` and `plan` skills get their template from the installed package, so the shared structure and the section instructions live in one place (`skills/templates.js`) and a project adds its own sections without copying anything:
