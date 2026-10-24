@@ -2,7 +2,7 @@
 
 How a connected project moves to a newer release of dark-factory, and how to recover when a bad release blocks Claude Code. For the first connection see [connecting-a-project.md](connecting-a-project.md).
 
-`vX.Y.Z` and `<commit-sha>` are placeholders: the release tag you move to and the 40-character commit of that tag. The package has no published release at the time of writing, so nothing here was run against one; the commands were checked against the code of the factory and against ordinary public git tags. Commands are POSIX shell (Bash, or Git Bash on Windows), run from the **git root** of your project.
+`vX.Y.Z` and `<commit-sha>` are placeholders: the release tag you move to and the 40-character commit of that tag. The first release `v0.1.0` is published and the factory itself runs on it; the commands were checked against the code of the factory and against ordinary public git tags, and no consumer project has been moved between two releases by this text yet. Commands are POSIX shell (Bash, or Git Bash on Windows), run from the **git root** of your project.
 
 ## What an upgrade changes
 
@@ -43,7 +43,24 @@ An empty answer (a missing tag), a failed `git ls-remote` and a malformed value 
 
 **Doctor does not confirm the tag and the SHA belong together** (CI does at run time). Step 9 below checks it by the same command.
 
-## Procedure
+## The short way: one command
+
+From a release that contains it, the installed package moves the project to the next one:
+
+```sh
+node node_modules/dark-factory/bin/pin.js vX.Y.Z --dry-run   # the preconditions only; npm, the lock and setup are not tried
+node node_modules/dark-factory/bin/pin.js vX.Y.Z
+```
+
+(also installed as the command `dark-factory-pin`). Run it in an ordinary terminal, on a clean branch that contains the project's default branch. It is the *installed, old* release that runs, so it works the same for every later upgrade. The first upgrade into a release that has the command, and any project on an older release, use the procedure below by hand.
+
+Before it writes anything it checks that the tag is published in the repository named by the project's own pin (an annotated tag is resolved to its commit), that the working tree is clean and contains `origin`'s default branch (`--base <branch>` names it when `origin/HEAD` is not set), that the tag is not older than the pinned one (`--allow-older` goes back on purpose), and that every workflow in `.github/workflows/` that calls the factory release is pinned to one full commit SHA, in `uses` and `with.factory-sha`, in all of them (a call at a tag, a branch or a short SHA is refused). Any failure is a refusal with the reason and no file changed.
+
+Then it does steps 4, 5, 6 and 8–9 of the procedure: `npm install --ignore-scripts` of the tag (into the field that holds the pin), a check that the lock holds the tag's commit, the missing `.gitignore` lines of the new base set (lines are only added), the commit SHA in every such workflow (both places), the explicit setup and `factory doctor` of the newly installed release, and a check that nothing but those files changed. If npm fails, the lock holds another commit, or the new release cannot plan its copies, the pin files are restored and you are told to run `npm ci`; if setup then fails, the files stay changed so that you can fix the cause and run setup again. It does not commit, push, open a pull request or create a tag.
+
+What stays yours: read the CHANGELOG between the two tags (step 2), compare the examples of the new tag (step 3), apply profile fields and hook entries it names (step 7), and open the PR (step 10). Doctor's exit code is the command's: `1` means problems are listed above and the files are already changed.
+
+## Procedure by hand
 
 1. **Branch.** Create the upgrade branch the way the project names branches. Do the upgrade in an ordinary terminal: replacing the installed package under a running Claude Code session with active gates is what [Recovery](#recovery-when-the-hooks-block-claude-code) is about.
 2. **SHA.** Choose the new tag, get `NEW_SHA` as above. Read the [CHANGELOG](../CHANGELOG.md) entries between your current tag and the new one: they name new profile fields, changed requirements and anything breaking.
