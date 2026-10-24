@@ -71,4 +71,4 @@ if (require.main === module) {
   console.log(`release-check: ${tag} ok`);
 }
 
-module.exports = { checkRelease, checkRepository, extractNotes };
+module.exports = { checkRelease, checkRepository, extractNotes, TAG_PATTERN };
