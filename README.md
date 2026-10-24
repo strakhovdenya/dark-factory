@@ -4,7 +4,7 @@ The shared core of an AI software factory: **Ralph** (an autonomous agent that e
 
 Projects install a pinned release of the package and supply project-specific values only through their own `.factory/profile.json` and overlays. Nothing project-specific lives in the core.
 
-> Status: bootstrap. The package has no release yet; the repository is being built phase by phase. What is implemented (setup, `factory doctor`, the verifier, Judge, the hooks, the Ralph controller) is described below and in the guides; a live run of the pinned `claude` CLI from an installed release, hooks and Ralph included, is not confirmed yet (#48).
+> Status: early. `v0.1.0` is the first release; the factory itself does not run on its own release yet (#27). What is implemented (setup, `factory doctor`, the verifier, Judge, the hooks, the Ralph controller) is described below and in the guides; a live run of the pinned `claude` CLI from an installed release, hooks and Ralph included, is not confirmed yet (#48).
 
 ## Guides
 
@@ -42,7 +42,7 @@ Git. Setup never changes tracked files, including `.gitignore`. The project must
 # ...one line per skill and agent of the set (a leading / and a trailing / for directories are fine)
 ```
 
-A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. In this repository the same file only runs the factory's own bootstrap until the factory runs on its own release. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md). The full order of a first connection (profile, install with `--ignore-scripts`, exclusions, setup, hooks) is in [docs/connecting-a-project.md](docs/connecting-a-project.md).
+A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. The postinstall of the factory package itself lays out nothing, needs no profile and exits `0`: the root postinstall of this repository (`INIT_CWD` is the package root or one of its directories), npm's temporary preparation of the package as a git dependency (an `npm install` in the unpacked tag, possibly without `.git`), and, inside that preparation, the factory's own pinned release installed as a dependency of the prepared tree. Any other start is a consumer and is checked in full, a project named `dark-factory` included; an explicit `--consumer-root` pointing at the package's own repository is an error. The factory receives its copies from the postinstall of its installed release, like any project. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md). The full order of a first connection (profile, install with `--ignore-scripts`, exclusions, setup, hooks) is in [docs/connecting-a-project.md](docs/connecting-a-project.md).
 
 ## Checking a project: `factory doctor`
 
@@ -103,10 +103,12 @@ TypeScript is used here only as a checker. Consuming projects are free to write 
 ## Commands
 
 ```sh
-npm install        # installs dev tooling; postinstall runs the repository's own metaskills bootstrap
+npm install        # installs dev tooling; the root postinstall lays out no copies
 npm test           # node --test; no network, no real AI
 npm run lint       # ESLint
 npm run typecheck  # tsc --noEmit (checkJs)
 ```
+
+Until the factory pins its own release (#27), `npm install` no longer runs the old metaskills bootstrap. A fresh clone gets the metaskills copies the development hooks of `.claude/` require with `node .claude/scripts/setup-metaskills.js .`, once, in an ordinary terminal.
 
 CI runs the same checks on every pull request: `Test (Linux)`, `Lint` and `Typecheck`.
