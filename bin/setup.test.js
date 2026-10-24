@@ -6,8 +6,10 @@
 
 const childProcess = require('node:child_process');
 const test = require('node:test');
+const { after } = test;
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { FIXTURE_PROFILES } = require('../test/helpers/profiles');
@@ -557,10 +559,15 @@ const npmCli = () => {
   return found;
 };
 
-// npm reads only its local cache (filled by `npm ci` of this repository), never the network.
+// npm needs no registry and no cache: the trees below have no registry dependencies (see `hermeticManifest`).
+// ajv and minimatch, which the setup of the installed package requires, come from this repository.
+// The cache is empty and private, so a hidden registry dependency fails here instead of passing on a warm machine.
+const npmCache = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-npm-cache-'));
+after(() => fs.rmSync(npmCache, { recursive: true, force: true }));
+
 const runNpm = (cwd, args) => {
   const inherited = Object.entries(process.env).filter(([name]) => !/^(npm_.*|init_cwd|node_path|node_options|node_test_context|_pacote_no_prepare_)$/i.test(name));
-  const env = { ...Object.fromEntries(inherited), npm_config_offline: 'true', npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false', npm_config_foreground_scripts: 'true' };
+  const env = { ...Object.fromEntries(inherited), NODE_PATH: path.join(REPO_ROOT, 'node_modules'), npm_config_cache: npmCache, npm_config_offline: 'true', npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false', npm_config_foreground_scripts: 'true' };
   const result = childProcess.spawnSync(process.execPath, [npmCli(), ...args], { cwd, env, encoding: 'utf8' });
   return { status: result.status, output: `${result.stdout}\n${result.stderr}` };
 };
@@ -570,13 +577,14 @@ const RELEASE_VERIFY = 'verify agent of the release\n';
 const WORKING_ISSUES = 'issues skill of the working copy\n';
 const WORKING_VERIFY = 'verify agent of the working copy\n';
 
-// Dev tooling is left out of both package.json copies: it takes no part in the lifecycle and only
-// slows the offline install. Runtime dependencies and the lock are the real ones.
-const withoutDevTooling = (dir, devDependencies) => {
+// Neither tree may need a registry: no dev tooling, no lock file and no registry dependencies. The
+// package under test is pinned as a git tag, and metaskills (the only runtime source of the base set)
+// is a `file:` dependency of the factory tree, so npm links it from this repository's node_modules.
+const hermeticManifest = (dir, { dependencies = {}, devDependencies = {} } = {}) => {
   const file = path.join(dir, 'package.json');
   const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
-  fs.writeFileSync(file, `${JSON.stringify({ ...manifest, devDependencies }, null, 2)}\n`);
-  fs.copyFileSync(path.join(REPO_ROOT, 'package-lock.json'), path.join(dir, 'package-lock.json'));
+  fs.writeFileSync(file, `${JSON.stringify({ ...manifest, dependencies, devDependencies }, null, 2)}
+`);
 };
 
 /**
@@ -588,7 +596,7 @@ const makeOwnFactory = (t, fixture) => {
   isolateGit(t);
   const scratch = tempDir(t, 'setup-lifecycle-');
   const release = ownTree(path.join(scratch, 'release'), fixture, { git: false });
-  withoutDevTooling(release, {});
+  hermeticManifest(release);
   writeFiles(release, { 'skills/issues/SKILL.md': RELEASE_ISSUES, 'agents/verify.md': RELEASE_VERIFY });
   gitIn(release, 'init', '-q', '-b', 'main');
   gitIn(release, 'add', '-A');
@@ -596,7 +604,10 @@ const makeOwnFactory = (t, fixture) => {
   gitIn(release, 'tag', 'v0.1.0');
 
   const factory = ownTree(path.join(scratch, 'factory'), fixture, { git: false });
-  withoutDevTooling(factory, { 'dark-factory': `git+${pathToFileURL(release).href}#v0.1.0` });
+  hermeticManifest(factory, {
+    dependencies: { metaskills: `file:${path.join(REPO_ROOT, 'node_modules', 'metaskills').replaceAll(path.sep, '/')}` },
+    devDependencies: { 'dark-factory': `git+${pathToFileURL(release).href}#v0.1.0` },
+  });
   writeFiles(factory, { 'skills/issues/SKILL.md': WORKING_ISSUES, 'agents/verify.md': WORKING_VERIFY });
   gitIn(factory, 'init', '-q', '-b', 'main');
   gitIn(factory, 'add', '-A');
@@ -616,7 +627,7 @@ const assertReleaseCopies = ({ factory, installed }, output) => {
   assert.ok(output.includes(`${NO_COPIES} (${factory})`), output);
   for (const dir of [factory, installed]) assert.ok(!fs.existsSync(path.join(dir, BOOTSTRAP_MARKER)), `bootstrap called in ${dir}`);
   const changed = gitIn(factory, 'status', '--porcelain').split('\n').filter(Boolean);
-  assert.deepEqual(changed, ['M package-lock.json'], 'only npm changed a tracked file');
+  assert.deepEqual(changed, ['?? package-lock.json'], 'the lock npm wrote is the only change');
 };
 
 scenarioTest('npm install in factory does not take copies from working copy', (t, fixture) => {
