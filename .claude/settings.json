@@ -2,11 +2,31 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/node_modules/dark-factory/hooks/closure-gate.js\" || exit 2",
+            "statusMessage": "Checking the task closure gate..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__github__issue_write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/node_modules/dark-factory/hooks/closure-gate.js\" || exit 2",
+            "statusMessage": "Checking the issue body against the format contract..."
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill-gate-hook.js\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR/node_modules/dark-factory/hooks/skill-gate.js\" || exit 2",
             "statusMessage": "Checking required skills are loaded..."
           }
         ]
@@ -18,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill-marker-hook.js\" || true"
+            "command": "node \"$CLAUDE_PROJECT_DIR/node_modules/dark-factory/hooks/skill-marker.js\" || true"
           }
         ]
       },
@@ -27,13 +47,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint-hook.js\" || true",
-            "statusMessage": "Auto-fixing lint..."
+            "command": "node \"$CLAUDE_PROJECT_DIR/node_modules/dark-factory/hooks/lint.js\" || true",
+            "statusMessage": "Running lint hooks..."
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/typecheck-hook.js\" || true",
-            "statusMessage": "Type-checking..."
+            "command": "node \"$CLAUDE_PROJECT_DIR/node_modules/dark-factory/hooks/typecheck.js\" || true",
+            "statusMessage": "Running typecheck hooks..."
           }
         ]
       }

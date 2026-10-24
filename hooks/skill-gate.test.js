@@ -10,6 +10,9 @@ const { FIXTURE_PROFILES, profileCopy } = require('../test/helpers/profiles');
 const { loadProfile } = require('../profile/load');
 const { requiredSkillsFor, BASE_SKILLS } = require('../profile/skill-rules');
 const { requiredSkillsForIssue } = require('../ralph/prompts');
+const { REPO_ROOT } = require('../test/helpers/factory-package');
+const { makeFactoryProject } = require('../test/helpers/factory-project');
+const { findBash } = require('../test/helpers/bash');
 const { markerPath } = require('./skill-marker');
 
 const HOOK = path.join(__dirname, 'skill-gate.js');
@@ -168,4 +171,124 @@ test('drive letter case of the root does not change the decision on win32', { sk
   assertPass(runHook(edit(file, withMarker([...BASE_SKILLS])), { root }), 'loaded');
   const otherDrive = `${root[0].toUpperCase() === 'Z' ? 'Y' : 'Z'}:\\project\\src\\a.ts`;
   assertPass(runHook(edit(otherDrive), { root }), 'other drive');
+});
+
+// --- the factory on its own release: the installed gate, the real profile and the real settings ---
+
+const FACTORY_FILE = 'verifier/x.js';
+const requiredByRelease = (installed) => JSON.parse(fs.readFileSync(path.join(installed, 'skills', 'base-set.json'), 'utf8')).requiredJsSkills;
+const factoryEdit = (project, sessionId = newSession()) => edit(path.join(project.root, ...FACTORY_FILE.split('/')), sessionId);
+
+/** The gate script of the installed release, run directly. */
+const runInstalledGate = (project, input) =>
+  spawnSync(process.execPath, [path.join(project.installed, 'hooks', 'skill-gate.js')], {
+    input: JSON.stringify(input),
+    encoding: 'utf8',
+    cwd: os.tmpdir(),
+    env: envWith(project.root),
+  });
+
+/** The Write|Edit gate command of the real settings of the factory. */
+const settingsGateCommand = (root) => {
+  const settings = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  const group = settings.hooks.PreToolUse.find((entry) => entry.matcher === 'Write|Edit');
+  assert.equal(group.hooks.length, 1);
+  return group.hooks[0].command;
+};
+
+/** Runs a settings command in Bash from `cwd`, with the event on stdin and CLAUDE_PROJECT_DIR as Claude Code sets it. */
+const runSettingsCommand = (command, { root, cwd, input, env = {} }) =>
+  spawnSync(findBash(), ['-c', command], {
+    input: JSON.stringify(input),
+    encoding: 'utf8',
+    cwd,
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root.split(path.sep).join('/'), ...env },
+  });
+
+// Records the script path of every Node process started with it: the proof of which module ran.
+const tracerFor = (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-tracer-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const trace = path.join(dir, 'trace.txt');
+  const tracer = path.join(dir, 'tracer.js');
+  fs.writeFileSync(tracer, `require('node:fs').appendFileSync(${JSON.stringify(trace)}, process.argv[1] + '\\n');\n`);
+  const executed = () => (fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean).map((script) => path.resolve(script)) : []);
+  return { env: { NODE_OPTIONS: `--require=${tracer.split(path.sep).join('/')}` }, executed };
+};
+
+test('factory profile requires skills for factory code', (t) => {
+  const project = makeFactoryProject(t);
+  const required = requiredByRelease(project.installed);
+  assert.ok(required.length > 0);
+  const result = runInstalledGate(project, factoryEdit(project));
+  assert.equal(result.status, 2);
+  assert.deepEqual(missingOf(result.stderr), required);
+  assert.match(result.stderr, /editing verifier\/x\.js requires/);
+
+  const partial = required.slice(0, 2);
+  const partialResult = runInstalledGate(project, factoryEdit(project, withMarker(partial)));
+  assert.equal(partialResult.status, 2);
+  assert.deepEqual(missingOf(partialResult.stderr), required.slice(2));
+});
+
+test('factory installed gate accepts loaded skills', (t) => {
+  const project = makeFactoryProject(t);
+  const required = requiredByRelease(project.installed);
+  assertPass(runInstalledGate(project, factoryEdit(project, withMarker(required))), 'all loaded');
+  assertPass(runInstalledGate(project, factoryEdit(project, withMarker(required.map((skill) => `plugin:${skill}`)))), 'with plugin prefix');
+  // a file that the table does not cover needs nothing
+  assertPass(runInstalledGate(project, edit(path.join(project.root, 'notes.md'))), 'not code');
+});
+
+test('factory gate fails closed without installed release', (t) => {
+  /** @type {[string, (project: any) => void][]} */
+  const damages = [
+    ['installed release missing', (project) => fs.rmSync(project.installed, { recursive: true })],
+    ['installed gate does not load', (project) => fs.rmSync(path.join(project.installed, 'profile'), { recursive: true })],
+  ];
+  for (const [label, damage] of damages) {
+    const project = makeFactoryProject(t);
+    const required = requiredByRelease(project.installed);
+    damage(project);
+    const trace = tracerFor(t);
+    const command = settingsGateCommand(project.root);
+    assert.ok(command.includes('node_modules/dark-factory/hooks/skill-gate.js') && command.endsWith('|| exit 2'), command);
+    // all skills are loaded: only the missing release can be the reason
+    const result = runSettingsCommand(command, { root: project.root, cwd: project.root, input: factoryEdit(project, withMarker(required)), env: trace.env });
+    assert.equal(result.status, 2, `${label}: ${result.stderr}`);
+    assert.ok(trace.executed().every((script) => !script.startsWith(path.join(REPO_ROOT, 'hooks'))), `${label}: no hook of the working copy ran`);
+  }
+});
+
+test('factory settings run the installed gate', (t) => {
+  const project = makeFactoryProject(t);
+  const required = requiredByRelease(project.installed);
+  const command = settingsGateCommand(project.root);
+  const subdirectory = path.join(project.root, 'verifier');
+  fs.mkdirSync(subdirectory, { recursive: true });
+
+  const trace = tracerFor(t);
+  const allowed = runSettingsCommand(command, { root: project.root, cwd: subdirectory, input: factoryEdit(project, withMarker(required)), env: trace.env });
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.equal(allowed.stdout, '');
+  const scripts = trace.executed();
+  assert.ok(scripts.includes(path.join(project.installed, 'hooks', 'skill-gate.js')), `the installed module ran: ${scripts.join(', ')}`);
+  assert.ok(scripts.every((script) => !script.startsWith(path.join(REPO_ROOT, 'hooks'))), 'not the working copy');
+
+  const blocked = runSettingsCommand(command, { root: project.root, cwd: subdirectory, input: factoryEdit(project) });
+  assert.equal(blocked.status, 2);
+  assert.deepEqual(missingOf(blocked.stderr), required);
+});
+
+test('factory settings hold the six installed entries and no working copy hook', (t) => {
+  const project = makeFactoryProject(t);
+  const text = fs.readFileSync(path.join(project.root, '.claude', 'settings.json'), 'utf8');
+  const release = JSON.parse(/```json\r?\n([\s\S]*?)\r?\n```/.exec(fs.readFileSync(path.join(project.installed, 'hooks', 'README.md'), 'utf8'))[1]);
+  assert.deepEqual(JSON.parse(text), release, 'the settings are the ones of the installed release');
+  const commands = Object.values(JSON.parse(text).hooks).flatMap((groups) => groups.flatMap((group) => group.hooks.map((hook) => hook.command)));
+  assert.equal(commands.length, 6);
+  assert.equal(commands.filter((command) => command.endsWith('|| exit 2')).length, 3);
+  assert.equal(commands.filter((command) => command.endsWith('|| true')).length, 3);
+  assert.ok(commands.every((command) => command.startsWith('node "$CLAUDE_PROJECT_DIR/node_modules/dark-factory/hooks/')), commands.join('\n'));
+  assert.ok(!text.includes('.claude/hooks/') && !text.includes('CLAUDE_PROJECT_DIR/hooks/'));
 });

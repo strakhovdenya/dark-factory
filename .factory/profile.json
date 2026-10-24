@@ -1,0 +1,29 @@
+{
+  "branchTemplate": "task/ISSUE-{issue}-{slug}",
+  "apps": [
+    {
+      "name": "factory",
+      "path": ".",
+      "install": [{ "argv": ["npm", "ci"], "cwd": "." }],
+      "gate": [
+        { "argv": ["node", "node_modules/eslint/bin/eslint.js", "."], "cwd": "." },
+        { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "." },
+        { "argv": ["npm", "test"], "cwd": "." }
+      ]
+    }
+  ],
+  "ruleFiles": ["CLAUDE.md"],
+  "docs": { "prd": "docs/prd", "plans": "docs/plans", "adr": "docs/decisions.md" },
+  "hooks": {
+    "lint": [
+      { "paths": ["**/*.js"], "command": { "argv": ["node", "node_modules/eslint/bin/eslint.js", "--fix", "{file}"], "cwd": "." } }
+    ],
+    "typecheck": [
+      { "paths": ["**/*.js"], "command": { "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"], "cwd": "." } }
+    ]
+  },
+  "verifier": {
+    "checks": ["spec-approval", "affects-scope", "computed-items", "test-tampering-scan", "references", "ci-checks", "allowed-model"]
+  },
+  "ralph": { "enabled": false }
+}

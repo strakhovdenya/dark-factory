@@ -1,0 +1,26 @@
+name: Spec Approval Wrapper
+
+# The factory's own wrapper of its reusable spec freeze, the same file as examples/wrappers/
+# spec-approval.yml with this repository's values. It is not named spec-approval.yml because that
+# file of this repository IS the reusable workflow. When an owner from .github/verifier/owners.json
+# (default branch) applies the `spec-approved` label to an issue, the release posts the approval
+# comment with the hash of the issue body.
+#
+# Pinning: the same full commit SHA as in verifier-wrapper.yml, in BOTH places, i.e. the commit of
+# the release tag that package.json pins; a different commit posts no approval.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  spec-approval:
+    name: Spec Approval
+    permissions:
+      contents: read
+      issues: write
+    uses: strakhovdenya/dark-factory/.github/workflows/spec-approval.yml@7e9150b7c6c18388814f46a9a827b0db450abaa8
+    with:
+      factory-sha: 7e9150b7c6c18388814f46a9a827b0db450abaa8

@@ -23,10 +23,23 @@ Thumbs.db
 # Personal local Claude Code permissions (never committed)
 .claude/settings.local.json
 
-# Bootstrap metaskills: copies made by .claude/scripts/setup-metaskills.js (run by hand; no postinstall) so that
-# Claude Code sees them as regular skills. The tracked .claude/skills/modern-javascript is not listed.
-.claude/skills/data-structures
-.claude/skills/js-data-structures
+# Copies of the base set of skills and agents laid out by the setup of the installed release
+# (node_modules/dark-factory) and the list of them. Named one by one, as setup requires; the
+# factory's own tools in .claude/skills and .claude/agents are not listed and stay tracked.
+.claude/.factory-installed.json
+.claude/skills/prd
+.claude/skills/plan
+.claude/skills/issues
+.claude/skills/task-lifecycle
+.claude/skills/epic-discovery
+.claude/skills/adr
 .claude/skills/js-conventions
-.claude/skills/error-handling
 .claude/skills/js-gof
+.claude/skills/js-data-structures
+.claude/skills/error-handling
+.claude/skills/modern-javascript
+.claude/skills/data-structures
+.claude/agents/research.md
+.claude/agents/codebase-scan.md
+.claude/agents/verify.md
+.claude/agents/pr-writer.md

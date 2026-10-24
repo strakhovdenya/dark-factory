@@ -35,6 +35,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "dark-factory": "github:strakhovdenya/dark-factory#v0.1.0",
     "eslint": "^10.12.0",
     "typescript": "^7.0.2"
   },

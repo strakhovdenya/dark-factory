@@ -1,0 +1,13 @@
+{
+  "test": [
+    "**/*.test.js",
+    "test/"
+  ],
+  "workflow": [
+    ".github/workflows/"
+  ],
+  "config": [
+    "eslint.config.js",
+    "tsconfig.json"
+  ]
+}

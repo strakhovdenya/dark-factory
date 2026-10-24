@@ -1,0 +1,46 @@
+name: Acceptance Verifier Wrapper
+
+# The factory's own wrapper of its reusable Acceptance Verifier, the same file as examples/wrappers/
+# acceptance-verifier.yml with this repository's values. It is not named acceptance-verifier.yml
+# because that file of this repository IS the reusable workflow. A workflow in another repository
+# cannot subscribe to this one's workflow_run, so this short file stays here; the verifier itself
+# runs from the pinned release.
+#
+# Pinning: the full commit SHA below, in BOTH places, is the commit of the release tag that
+# package.json pins as the `dark-factory` dependency (`git rev-parse vX.Y.Z^{commit}`), the same SHA
+# as in spec-approval-wrapper.yml. The release verifier gives FAIL when the tag and this SHA differ,
+# so package.json, package-lock.json and both wrappers move in one PR (docs/upgrading.md).
+#
+# workflow_run always runs this file from the default branch, so a PR cannot change which verifier
+# checks it. The verdict is enforced: a non-PASS verdict fails the `Acceptance Verifier` status.
+#
+# Settings of this repository: variable VERIFIER_MODEL (a model of .github/verifier/allowed-models.json),
+# secret OPENAI_API_KEY, and the trusted configs in .github/verifier/ on the default branch.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+concurrency:
+  group: acceptance-verifier-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  acceptance-verifier:
+    name: Acceptance Verifier
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+      checks: read
+      statuses: write
+    uses: strakhovdenya/dark-factory/.github/workflows/acceptance-verifier.yml@7e9150b7c6c18388814f46a9a827b0db450abaa8
+    with:
+      factory-sha: 7e9150b7c6c18388814f46a9a827b0db450abaa8
+      model: ${{ vars.VERIFIER_MODEL }}
+      enforce: true
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
