@@ -16,6 +16,8 @@ const path = require('node:path');
 const { FIXTURE_PROFILES } = require('../test/helpers/profiles');
 const { gitignoreText, REPO_ROOT } = require('../test/helpers/factory-package');
 const { tarballFiles, packedManifest, installPackage, runtimeClosure } = require('../test/fixtures/installed-ralph/package');
+const { makeFactoryProject } = require('../test/helpers/factory-project');
+const { npmCli } = require('../test/helpers/npm');
 const { runSetup } = require('./setup');
 const { HOOK_ENTRIES, entryId } = require('../hooks/entries');
 
@@ -150,17 +152,6 @@ const runDoctor = ({ cwd, args = ['doctor'], gh = {}, entry = DOCTOR, env = {} }
 // --- the delivery: a real npm pack of this checkout, prepared once ---
 
 const delivery = { dir: '', tarball: '', manifest: null, runtimeDir: '' };
-const npmCli = () => {
-  const candidates = [
-    process.env.npm_execpath,
-    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-  ];
-  const found = candidates.find((file) => file && file.endsWith('.js') && fs.existsSync(file));
-  if (!found) throw new Error('npm-cli.js of the running Node is not found; npm pack cannot run');
-  return found;
-};
-
 const prepareDelivery = () => {
   if (delivery.tarball) return delivery;
   delivery.dir = freshDir('delivery');
@@ -829,5 +820,37 @@ describe('factory doctor: location and delivery', () => {
     const setup = childProcess.spawnSync(process.execPath, [path.join(fresh.root, 'node_modules', 'dark-factory', manifest.bin['dark-factory-setup']), '--consumer-root', fresh.root], { cwd: fresh.root, encoding: 'utf8', env: cleanEnv() });
     assert.equal(setup.status, 0, setup.stderr);
     assert.ok(fs.existsSync(path.join(fresh.root, '.claude', '.factory-installed.json')));
+  });
+});
+
+describe('factory doctor: the factory itself', () => {
+  // The real connection files of this repository (INV-17) next to the installed release; only gh is replaced.
+  const factoryGh = (root, { labels = CORE_LABELS } = {}) => {
+    const [model] = JSON.parse(fs.readFileSync(path.join(root, '.github', 'verifier', 'allowed-models.json'), 'utf8'));
+    return { labels, secrets: ['OPENAI_API_KEY'], variables: { VERIFIER_MODEL: model }, secretValues: { OPENAI_API_KEY: SECRET_VALUE }, fail: {} };
+  };
+  const doctorOfFactory = (project, gh) => runDoctor({ cwd: project.root, entry: path.join(project.installed, 'bin', 'doctor.js'), gh: { [project.root]: gh } });
+
+  it('doctor passes on factory itself without ralph checks', (t) => {
+    const project = makeFactoryProject(t);
+    const profile = JSON.parse(fs.readFileSync(path.join(project.root, '.factory', 'profile.json'), 'utf8'));
+    assert.equal(profile.ralph.enabled, false);
+    assert.equal(profile.judge, undefined);
+    assert.ok(project.files.includes('.github/workflows/verifier-wrapper.yml') && project.files.includes('.github/verifier/owners.json'), 'the real files are the input');
+
+    const gh = factoryGh(project.root);
+    assert.ok(!gh.labels.includes('ralph-blocked') && !gh.labels.includes('calibrate'), 'no label of Ralph or Judge is set');
+    const result = doctorOfFactory(project, gh);
+    expectClean(result);
+    assert.equal(result.calls.filter((call) => call.tool === 'gh').length, 3, 'one read of labels, secrets, variables');
+    assert.ok(fs.existsSync(path.join(project.root, '.claude', '.factory-installed.json')), 'the copies come from the installed release');
+    assert.ok(fs.existsSync(path.join(project.root, '.claude', 'skills', 'release', 'SKILL.md')), 'the own tools stay');
+  });
+
+  it('doctor on factory reports missing label', (t) => {
+    const project = makeFactoryProject(t);
+    const result = doctorOfFactory(project, factoryGh(project.root, { labels: CORE_LABELS.filter((name) => name !== 'spec-approved') }));
+    expectProblem(result, /label "spec-approved": does not exist/);
+    assert.equal(problemLines(result).length, 1, result.stdout);
   });
 });

@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { npmCli } = require('../test/helpers/npm');
 const { FIXTURE_PROFILES } = require('../test/helpers/profiles');
 const { tempDir, isolateGit, gitIn, writeFiles } = require('../test/helpers/ralph');
 const { copyPackageEntries, skillNames, gitignoreText, baseDestinations, installFactoryPackage, runSetupScript, REPO_ROOT } = require('../test/helpers/factory-package');
@@ -547,17 +548,6 @@ scenarioTest('release setup still installs in both consumer forms', (t, fixture)
 });
 
 // --- npm lifecycle of the factory on its own pinned release, offline ---
-
-const npmCli = () => {
-  const candidates = [
-    process.env.npm_execpath,
-    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-  ];
-  const found = candidates.find((file) => file && path.basename(file) === 'npm-cli.js' && fs.existsSync(file));
-  if (!found) throw new Error('npm-cli.js of the running Node is not found; npm cannot run');
-  return found;
-};
 
 // npm needs no registry and no cache: the trees below have no registry dependencies (see `hermeticManifest`).
 // ajv and minimatch, which the setup of the installed package requires, come from this repository.

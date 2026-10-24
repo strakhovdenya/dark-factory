@@ -13,9 +13,9 @@ This repo is developed by its owner in an interactive Claude Code session. Ralph
 | Path | Role | Ships to projects |
 |---|---|---|
 | `bin/`, `doctor/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/` | Package sources (the `files` field of `package.json`) | **yes** |
-| `.claude/` | Tooling for developing the factory only (its own scripts, settings, skills, agents) | no |
-| `.factory/profile.json` | The factory's own project profile | no |
-| `.github/` | CI of this repo | no |
+| `.claude/` | Tooling for developing the factory only (its own scripts, skills `add-factory-element` and `release`, agents `core-literal-scan` and `fixture-profile-run`; `settings.json` wires the hooks of the installed release) | no |
+| `.factory/profile.json` | The factory's own project profile (the standard profile of a project: the seven verifier checks, Ralph and Judge off) | no |
+| `.github/` | CI of this repo, the trusted verifier configs in `.github/verifier/` and the wrappers `verifier-wrapper.yml` and `spec-approval-wrapper.yml` (the files `acceptance-verifier.yml` and `spec-approval.yml` are the reusable workflows themselves) | no |
 
 Rules of placement:
 - Something a project must receive → package dirs (`bin/`, `doctor/`, `skills/`, `agents/`, `hooks/`, `profile/`, `verifier/`, `judge/`, `ralph/`).
@@ -52,16 +52,42 @@ Applies to a Ralph step, a verifier check, a doctor check, a hook, or a package 
 
 ## Release cycle (edit → release → bump tag)
 
-The factory uses its own **pinned release** (git tag `vX.Y.Z`), installed like in any project. Hooks and skills active in your session come from that release, not from the working copy.
+The factory runs on its own **pinned release**, installed like in any project: the root `package.json` has `devDependencies["dark-factory"]: "github:strakhovdenya/dark-factory#vX.Y.Z"`, so the release lands in `node_modules/dark-factory` and the lock holds the commit of the tag. Hooks (`.claude/settings.json`), the base set of skills and agents (copies laid out by the setup of the installed release, listed by name in `.gitignore` and in `.claude/.factory-installed.json`), `factory doctor` and the Acceptance Verifier of the pull requests all come from that release, not from the working copy. The root `postinstall` (`node bin/setup.js`) of this repository lays out nothing: it ends successfully for the factory package itself (see README), and the copies come from the postinstall of the installed release.
 
-- Editing a hook or skill in the working copy does **not** change the behavior of the current session. The change takes effect only after: edit → merge → release a new tag → change the tag pinned in the factory.
+- Editing a hook, skill, verifier check or setup in the working copy does **not** change the behavior of the current session or of CI. The change takes effect only after: edit → merge → release a new tag → change the pin of the factory.
 - Do not try to "fix" a hook by editing it and expecting the session to pick it up.
+- **Standard pin.** A release is a tag `vX.Y.Z` on a commit of `main` with green CI, made with `node .claude/scripts/release-tag.js vX.Y.Z` (the `release` skill). The factory then moves to it in **one** PR that changes `package.json`, `package-lock.json` and the full commit SHA (`git rev-parse vX.Y.Z^{commit}`) in both places of both wrappers, `verifier-wrapper.yml` and `spec-approval-wrapper.yml`. A tag is never moved and a branch is never pinned. The steps are in [docs/upgrading.md](docs/upgrading.md).
+- **First connection.** The tag `v0.1.0` could not be pinned by the PR that prepared it, so the first connection took three steps in this order: PR-A (package fixes of setup and the notes of `0.1.0`, `Refs`) → merge, green CI on `main`, the tag published → PR-B (the pin, profile, trusted configs, wrappers, settings and the removal of the bootstrap, `Closes`). The same order applies to any change that a release must contain before the factory can use it.
+- **From the first PR after the wrappers are merged**, the pinned verifier checks the factory's pull requests. Its `affects-scope` check turns a file outside the issue's `## Affects` into `FAIL` with `out_of_scope_file`, instead of the diff review of the bootstrap period. This is not a ban on changing the core: a core change inside the Affects of its issue is the normal case. Past pull requests are not re-checked.
 
 ## Recovery
 
-- **Fresh clone:** run `npm install` first (restores the pinned release, including hooks and copies of skills), then work. Until the factory pins its own release (#27), `npm install` lays out no copies: run `node .claude/scripts/setup-metaskills.js` once, in an ordinary terminal, for the metaskills copies the development hooks of `.claude/` require.
-- **Broken pinned release** (a hook gate blocks Write/Edit, so files cannot be edited): do not try to edit files. Use Bash or your own terminal and roll the pinned tag back to the previous release with an npm or git command (reinstall the previous `vX.Y.Z`, or check out the previous tag). Then fix the problem in the working copy, cut a new release, and move the pin forward.
-- The exact rollback command depends on the installation mechanism chosen in the task "Factory on its own release"; that task refines this section.
+All of this is done in an **ordinary terminal outside Claude Code**. Inside a session the `Bash` gate of a missing or broken release blocks every Bash call, `npm` included, and `Write|Edit` too.
+
+- **Fresh clone:** `npm ci`. It installs the pinned release and runs its setup, which lays out the copies of skills and agents. Then `node node_modules/dark-factory/bin/doctor.js doctor`. Doctor reads the GitHub settings with `gh`, so it needs `gh auth login`.
+- **Missing or broken installed package** (a gate blocks Write/Edit, `node_modules/dark-factory` is gone or does not start): do not try to repair it from the blocked session and do not edit hook files. Do not roll back the whole working copy and do not move a public tag. Reinstall exactly what the lock says, and run setup and doctor:
+
+  ```sh
+  rm -rf node_modules
+  npm ci --ignore-scripts
+  node node_modules/dark-factory/bin/setup.js --consumer-root .
+  node node_modules/dark-factory/bin/doctor.js doctor
+  ```
+
+  For the first release there is no previous version: this reinstalls the current pin.
+- **A broken release** (the pinned tag itself is bad): put the previous working state of the pin back and reinstall. `<good-ref>` is the last commit that worked; commit or stash your own work first. The pin, the lock, both SHAs of both wrappers and the files that go with the old release come back together, the dependency and nothing else:
+
+  ```sh
+  GOOD=<good-ref>
+  git checkout "$GOOD" -- package.json package-lock.json .gitignore .factory/profile.json .claude/settings.json .github/workflows/verifier-wrapper.yml .github/workflows/spec-approval-wrapper.yml
+  rm -rf node_modules
+  npm ci --ignore-scripts
+  node node_modules/dark-factory/bin/setup.js --consumer-root .
+  node node_modules/dark-factory/bin/doctor.js doctor
+  ```
+
+  Once `Write|Edit` works again, fix the problem in the working copy, cut a new release and move the pin forward by PR. Setup removes copies that left the base set only when they have no tracked files.
+- **Clone from before the first connection** (it still has the old unmanaged copies): once, before `npm ci`, delete the five old copies `.claude/skills/{data-structures,js-data-structures,js-conventions,error-handling,js-gof}`, and `.claude/skills/modern-javascript` if it is still tracked (`git rm -r --cached .claude/skills/modern-javascript`, then delete the directory); then `npm ci`. Setup never adopts a path it does not own, so it stops with the path named until this is done. Own tools and your own changes are kept.
 
 ## Task process
 
@@ -72,8 +98,8 @@ Factory work follows the same flow as projects: **GitHub Issue → branch → PR
 - Branch name: `task/ISSUE-<n>-<slug>`.
 - Before opening a PR, run `/code-review` on the branch and fix or explicitly dismiss every finding; mention the outcome in the PR description.
 - PR description starts with `Closes #<n>`.
-- The `issues` and `task-lifecycle` skills (base package set) drive this process. Before the first release they do not exist in this repo; they arrive as copies from the pinned release. Follow their procedures rather than restating them here.
-- Until the first release is installed, follow the flow above manually.
+- The `issues` and `task-lifecycle` skills (base package set) drive this process. They are copies laid out by the setup of the installed release. Follow their procedures rather than restating them here.
+- The Acceptance Verifier of the pinned release checks the pull request against the issue; the `Affects` section of the issue must name every file the PR changes.
 
 ## Style
 

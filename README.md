@@ -4,7 +4,7 @@ The shared core of an AI software factory: **Ralph** (an autonomous agent that e
 
 Projects install a pinned release of the package and supply project-specific values only through their own `.factory/profile.json` and overlays. Nothing project-specific lives in the core.
 
-> Status: early. `v0.1.0` is the first release; the factory itself does not run on its own release yet (#27). What is implemented (setup, `factory doctor`, the verifier, Judge, the hooks, the Ralph controller) is described below and in the guides; a live run of the pinned `claude` CLI from an installed release, hooks and Ralph included, is not confirmed yet (#48).
+> Status: early. `v0.1.0` is the first release, and the factory runs on it like any project: the pinned tag in `devDependencies`, the hooks, skills and agents of the installed release, the profile in `.factory/profile.json` and the verifier of the pinned release on its pull requests (Ralph and Judge off). What is implemented (setup, `factory doctor`, the verifier, Judge, the hooks, the Ralph controller) is described below and in the guides; a live run of the pinned `claude` CLI from an installed release, hooks and Ralph included, is not confirmed yet (#48).
 
 ## Guides
 
@@ -42,7 +42,7 @@ Git. Setup never changes tracked files, including `.gitignore`. The project must
 # ...one line per skill and agent of the set (a leading / and a trailing / for directories are fine)
 ```
 
-A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. The postinstall of the factory package itself lays out nothing, needs no profile and exits `0`: the root postinstall of this repository (`INIT_CWD` is the package root or one of its directories), npm's temporary preparation of the package as a git dependency (an `npm install` in the unpacked tag, possibly without `.git`), and, inside that preparation, the factory's own pinned release installed as a dependency of the prepared tree. Any other start is a consumer and is checked in full, a project named `dark-factory` included; an explicit `--consumer-root` pointing at the package's own repository is an error. The factory receives its copies from the postinstall of its installed release, like any project. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md). The full order of a first connection (profile, install with `--ignore-scripts`, exclusions, setup, hooks) is in [docs/connecting-a-project.md](docs/connecting-a-project.md).
+A general mask such as `.claude/skills/` is not enough, and `git check-ignore` must confirm that a later rule or negation does not re-include the recipient; the error names the missing line. The whole plan (profile, sources, list, tracked files, ignore rules, conflicts, links outside the project) is checked before the first write. As the package's `postinstall` it exits non-zero on any of these problems, which fails the install: fix the cause, or install with `--ignore-scripts` and run `dark-factory-setup` once ready. The postinstall of the factory package itself lays out nothing, needs no profile and exits `0`: the root postinstall of this repository (`INIT_CWD` is the package root or one of its directories), npm's temporary preparation of the package as a git dependency (an `npm install` in the unpacked tag, possibly without `.git`), and, inside that preparation, the factory's own pinned release installed as a dependency of the prepared tree. Any other start is a consumer and is checked in full, a project named `dark-factory` included; an explicit `--consumer-root` pointing at the package's own repository is an error. The factory receives its copies from the postinstall of its installed release (`node_modules/dark-factory`), like any project; if that release is missing or its setup fails, `npm install` fails and nothing falls back to the working sources. Ralph runs setup in each clone itself, see [ralph/README.md](ralph/README.md). The full order of a first connection (profile, install with `--ignore-scripts`, exclusions, setup, hooks) is in [docs/connecting-a-project.md](docs/connecting-a-project.md).
 
 ## Checking a project: `factory doctor`
 
@@ -103,12 +103,13 @@ TypeScript is used here only as a checker. Consuming projects are free to write 
 ## Commands
 
 ```sh
-npm install        # installs dev tooling; the root postinstall lays out no copies
+npm ci             # installs the pinned release; its setup lays out the copies of skills and agents; the root postinstall lays out nothing
 npm test           # node --test; no network, no real AI
 npm run lint       # ESLint
 npm run typecheck  # tsc --noEmit (checkJs)
+node node_modules/dark-factory/bin/doctor.js doctor   # connection check of this repository (needs gh)
 ```
 
-Until the factory pins its own release (#27), `npm install` no longer runs the old metaskills bootstrap. A fresh clone gets the metaskills copies the development hooks of `.claude/` require with `node .claude/scripts/setup-metaskills.js .`, once, in an ordinary terminal.
+The repository runs on its own pinned release; the commands to restore a missing or broken one, to make a release and to move the pin are in [CLAUDE.md](CLAUDE.md) (Release cycle, Recovery). A live run of the pinned `claude` CLI with these hooks is not confirmed yet (#48).
 
-CI runs the same checks on every pull request: `Test (Linux)`, `Lint` and `Typecheck`.
+CI runs the same checks on every pull request: `Test (Linux)`, `Test (Windows)`, `Lint` and `Typecheck`.
