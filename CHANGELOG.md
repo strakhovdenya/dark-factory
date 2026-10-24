@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-25
+
+Third release. It adds the package command `dark-factory-ralph-wsl` and the optional `wsl` section of `.ralph/config.json`. The rest of the package is unchanged since `v0.1.1`.
+
 ### Added
 
 - Package command `dark-factory-ralph-wsl` (`bin/ralph-wsl.js`, new `bin` entry): on Windows it runs Ralph from a service clone on the Linux file system of a WSL2 distribution in one command. It updates the clone (`git merge --ff-only` to the default branch of `origin`, `npm ci` only when the lock changed), passes `CLAUDE_CODE_OAUTH_TOKEN` through `WSLENV`, archives previous runs into `<runsRoot>/archive/<time>/` (5 newest, none older than 14 days) and starts `ralph/run.js` as its own process. The controller is unchanged. See `ralph/README.md`.
