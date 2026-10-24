@@ -21,6 +21,6 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: strakhovdenya/dark-factory/.github/workflows/spec-approval.yml@7e9150b7c6c18388814f46a9a827b0db450abaa8
+    uses: strakhovdenya/dark-factory/.github/workflows/spec-approval.yml@9799b65bd231e06d5d1066065363215a467d9f4f
     with:
-      factory-sha: 7e9150b7c6c18388814f46a9a827b0db450abaa8
+      factory-sha: 9799b65bd231e06d5d1066065363215a467d9f4f
