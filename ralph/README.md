@@ -41,6 +41,21 @@ There is no host fallback at any stage: without Docker nothing runs.
 - **What the stub proves and what it does not.** The stub is a separate process in the real agent container: it reads the permission settings the controller wrote for its pass, probes the container (credentials, home, mounts, `.git`, network) and answers like the CLI. It proves the controller's settings and the container boundaries; it does not prove that a real Claude obeys the permission rules, the real CLI flags or the `code-review` skill: those belong to the real Claude run.
 - **Maps.** The reference Docker scenarios (`test/fixtures/ralph-sandbox/cases.json`, `test/fixtures/ralph-controller/integration-cases.json`) name the integration tests that execute them. The status `integration-mapped` records coverage, never a passed run; the result of a run is the CI job.
 
+## Running on Windows through WSL
+
+On Windows with Docker Desktop the run clone on a Windows disk is mounted through the file bridge and is unusably slow (lint hooks after every edit take minutes). `dark-factory-ralph-wsl` runs the same controller from a service clone on the Linux file system of a WSL2 distribution, in one command from your ordinary clone:
+
+```sh
+node node_modules/dark-factory/bin/ralph-wsl.js [--config .ralph/config.json]
+```
+
+- **Requirements (one-time machine setup, not done by the command).** WSL2 with a distribution, Docker Desktop integration enabled for that distribution, Node 22 in the distribution (on the `PATH` of a non-interactive `wsl.exe --exec` call: a version manager that sets `PATH` only in the interactive shell profile is not found), and a service clone of the project on the Linux file system of the distribution (not under `/mnt/<drive>`) with `origin`, `npm ci` done and on the default branch. It is only the launch point of Ralph.
+- **The `wsl` section** of `.ralph/config.json` (optional; a config without it is validated as before and the controller ignores it): `distro` (name from `wsl.exe -l -q`), `clone` (absolute POSIX path of the service clone) and `runsRoot` (absolute POSIX path on the Linux file system, for example under `/var/tmp`, outside the home directory). There are no defaults. The queue and limits stay in the Windows file, which the command only reads.
+- **What the host mode does.** Checks that the distribution exists, that the service clone is clean and on the default branch of `origin`, then `git fetch` and `git merge --ff-only`; `npm ci` runs only when `package-lock.json` changed (or the package is not installed). It then starts itself inside WSL (`--inner`) with the config on stdin; Ralph's output appears in the same terminal and the exit code of the run is the exit code of the command. A dirty or off-branch clone, or a failed fast-forward, stops the command before any change.
+- **Token.** `CLAUDE_CODE_OAUTH_TOKEN` set on Windows is passed to WSL by name through `WSLENV`; it is never put into an argument, output or file. Without it the inner mode stops with an error before it moves anything.
+- **The inner mode** writes a copy of the config without `wsl` and with `runsRoot` equal to `wsl.runsRoot` into the service clone, then starts `node_modules/dark-factory/ralph/run.js` there as a separate process.
+- **Archive of previous runs.** The controller deletes the previous task clone at start, so before each run the inner mode moves `issue-<n>` (left only by a failed or interrupted run), `issue-<n>-sessions` and `state.json` from the runs root to `<runsRoot>/archive/<YYYYMMDD-HHMMSS>/`. The archive keeps the 5 newest directories and removes any older than 14 days; only direct children of `archive/` with such a name are ever deleted. If `run.lock` points at a live process, nothing is moved or deleted and Ralph is not started.
+
 ## Skills and agents setup in the clone
 
 Preparing a clone runs in this order: all installs of the root and of the apps, then the package's own setup, then the check of the required skills, then the agent permissions and the agent. Setup is clone preparation, not a step of the pipeline registry.

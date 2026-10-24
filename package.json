@@ -9,6 +9,7 @@
   },
   "bin": {
     "dark-factory-pin": "bin/pin.js",
+    "dark-factory-ralph-wsl": "bin/ralph-wsl.js",
     "dark-factory-setup": "bin/setup.js",
     "factory": "bin/doctor.js"
   },

@@ -31,7 +31,8 @@ const DEFAULT_TASK_MAX_USD = 30;
 const LOCAL_CONFIG_RELATIVE_PATH = path.join('.ralph', 'config.json');
 
 const POSITIVE_NUMBER_FIELDS = ['maxIterations', 'maxTurns', 'reviewMaxTurns', 'agentTimeoutMinutes', 'taskMaxMinutes', 'taskMaxUsd'];
-const LOCAL_CONFIG_FIELDS = ['issues', 'agentModel', 'runsRoot', ...POSITIVE_NUMBER_FIELDS];
+const LOCAL_CONFIG_FIELDS = ['issues', 'agentModel', 'runsRoot', 'wsl', ...POSITIVE_NUMBER_FIELDS];
+const WSL_FIELDS = ['distro', 'clone', 'runsRoot'];
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isIssueNumber = (value) => Number.isInteger(value) && value >= 1;
@@ -47,6 +48,22 @@ const issueProblems = (issues) => {
     const deps = entry.dependsOn === undefined ? [] : entry.dependsOn;
     if (!Array.isArray(deps) || !deps.every(isIssueNumber)) problems.push(`issues[${index}].dependsOn: must be an array of issue numbers`);
   });
+  return problems;
+};
+
+// An absolute POSIX path that is on the Linux file system of the distribution, not on a Windows
+// drive mounted at /mnt/<letter>.
+const isLinuxAbsolutePath = (value) =>
+  typeof value === 'string' && value.startsWith('/') && value !== '/' && !value.split('/').includes('..') && !/^\/mnt\/[A-Za-z](\/|$)/.test(value);
+
+// The optional `wsl` section read by the `dark-factory-ralph-wsl` command; the controller ignores it.
+const wslProblems = (wsl) => {
+  if (!isPlainObject(wsl)) return ['wsl: must be an object { distro, clone, runsRoot }'];
+  const problems = Object.keys(wsl).filter((name) => !WSL_FIELDS.includes(name)).map((name) => `wsl.${name}: unknown field`);
+  if (typeof wsl.distro !== 'string' || wsl.distro.trim() === '') problems.push('wsl.distro: must be a non-empty string');
+  for (const name of ['clone', 'runsRoot']) {
+    if (!isLinuxAbsolutePath(wsl[name])) problems.push(`wsl.${name}: must be an absolute POSIX path on the Linux file system (not /mnt/<drive>/...)`);
+  }
   return problems;
 };
 
@@ -67,6 +84,7 @@ function validateLocalConfig(config) {
     }
   }
   problems.push(...issueProblems(section.issues));
+  if (section.wsl !== undefined) problems.push(...wslProblems(section.wsl));
   for (const name of POSITIVE_NUMBER_FIELDS) {
     const value = section[name];
     if (value !== undefined && !(typeof value === 'number' && Number.isFinite(value) && value > 0)) {

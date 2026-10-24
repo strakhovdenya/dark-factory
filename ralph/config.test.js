@@ -91,3 +91,26 @@ test('does not take over a lock file that another starter has just created', (t)
   assert.throws(() => acquireLock(lockPath, dead), /is starting/);
   assert.equal(fs.readFileSync(lockPath, 'utf8'), '');
 });
+
+const WSL = { distro: 'Dist', clone: '/home/op/clone', runsRoot: '/var/tmp/runs' };
+
+test('accepts a wsl section with distro, clone and runsRoot', () => {
+  /** @type {any} */
+  const result = validateLocalConfig({ issues: [], wsl: { ...WSL } });
+  assert.deepEqual(result.wsl, WSL);
+});
+
+test('rejects an incomplete wsl section or a path on a windows drive', () => {
+  const cases = [
+    [{ clone: WSL.clone, runsRoot: WSL.runsRoot }, /wsl\.distro/],
+    [{ ...WSL, clone: 'clone/relative' }, /wsl\.clone/],
+    [{ ...WSL, runsRoot: '/mnt/c/runs' }, /wsl\.runsRoot/],
+  ];
+  for (const [wsl, pattern] of cases) assert.throws(() => validateLocalConfig({ issues: [], wsl }), pattern);
+});
+
+test('validates a config without a wsl section as before', () => {
+  const result = validateLocalConfig({ issues: [{ id: 1 }], maxTurns: 5 });
+  assert.equal('wsl' in result, false);
+  assert.deepEqual(result, { issues: [{ id: 1, dependsOn: [] }], maxTurns: 5 });
+});
