@@ -235,3 +235,61 @@ test('parses only complete verify commands', () => {
   assert.equal(parseArgs(['verify', '--package', '--repository']), null);
   assert.equal(run([]).status, 2);
 });
+
+// Origin with two releases: v1.0.0 and v1.1.0 (a later commit).
+const upgradeRepos = (t) => {
+  const { checkout, tagged, later } = factoryRepos(t);
+  const origin = path.join(path.dirname(checkout), 'origin');
+  git(origin, 'tag', '-a', 'v1.1.0', '-m', 'v1.1.0', later);
+  return { checkout, oldSha: tagged, newSha: later };
+};
+
+const pinFile = (t, tag) => tempPackage(t, JSON.stringify(withFactory(`${REPO}#${tag}`)));
+
+const upgradeArgs = (trusted, head, checkout, wrapperSha) => [
+  ...verifyArgs(trusted, checkout, wrapperSha),
+  '--head-package', head,
+];
+
+test('accepts a pin moved together with the wrapper', (t) => {
+  const { checkout, oldSha, newSha } = upgradeRepos(t);
+  const trusted = pinFile(t, 'v1.0.0');
+  const head = pinFile(t, 'v1.1.0');
+  const upgrade = run(upgradeArgs(trusted, head, checkout, newSha));
+  assert.equal(upgrade.status, 0, upgrade.stderr);
+  assert.equal(upgrade.stdout, `factory pin: v1.1.0 (${newSha})\n`);
+
+  const unchanged = run(upgradeArgs(trusted, trusted, checkout, oldSha));
+  assert.equal(unchanged.status, 0, unchanged.stderr);
+  const unmoved = run(upgradeArgs(trusted, trusted, checkout, newSha));
+  assert.equal(unmoved.status, 1, 'a head that keeps the pin still needs the anchor SHA');
+});
+
+test('rejects a wrapper SHA changed without the tag', (t) => {
+  const { checkout, oldSha, newSha } = upgradeRepos(t);
+  const trusted = pinFile(t, 'v1.0.0');
+  const result = run(upgradeArgs(trusted, trusted, checkout, newSha));
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /factory pin mismatch/);
+  assert.ok([oldSha, newSha].every((sha) => result.stderr.includes(sha)), result.stderr);
+});
+
+test('rejects a tag changed without the wrapper SHA', (t) => {
+  const { checkout, oldSha } = upgradeRepos(t);
+  const trusted = pinFile(t, 'v1.0.0');
+  const head = pinFile(t, 'v1.1.0');
+  const result = run(upgradeArgs(trusted, head, checkout, oldSha));
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /factory pin mismatch: tag v1.1.0/);
+});
+
+test('rejects an upgrade head with a floating or foreign pin, or a broken anchor', (t) => {
+  const { checkout, newSha } = upgradeRepos(t);
+  const trusted = pinFile(t, 'v1.0.0');
+  const floating = pinFile(t, 'main');
+  assert.match(run(upgradeArgs(trusted, floating, checkout, newSha)).stderr, /floating factory reference/);
+  const foreign = tempPackage(t, JSON.stringify(withFactory('github:someone/dark-factory#v1.1.0')));
+  assert.match(run(upgradeArgs(trusted, foreign, checkout, newSha)).stderr, /does not install from/);
+  const head = pinFile(t, 'v1.1.0');
+  assert.match(run(upgradeArgs(floating, head, checkout, newSha)).stderr, /floating factory reference/);
+});

@@ -105,11 +105,40 @@ const runGit = (dir, args) =>
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-// The whole pin check of a workflow run: the tag from the project's
-// package.json, resolved to its commit in the factory checkout's origin, must
-// be wrapperSha. Returns { tag, tagSha }; throws with the reason otherwise.
-const verifyPin = ({ packageFile, repository, factoryDir, wrapperSha, git = runGit }) => {
-  const tag = readFactoryTagFile(packageFile, { repository });
+// The tag whose commit the wrapper must call. The default-branch package.json
+// (packageFile) is the trust anchor and must always be valid. A pull request
+// head that moves the pin (headPackageFile names another tag) is an upgrade:
+// the wrapper in that head is the new pin, so the head's tag must resolve to
+// it. A head that leaves the tag alone is checked against the anchor tag.
+const pinnedTag = ({ packageFile, headPackageFile, repository }) => {
+  const trustedTag = readFactoryTagFile(packageFile, { repository });
+  if (headPackageFile === undefined) return trustedTag;
+  // The anchor is read above so that a broken default-branch pin still fails.
+  return readFactoryTagFile(headPackageFile, { repository });
+};
+
+// The whole pin check of a workflow run: the pinned tag (see pinnedTag),
+// resolved to its commit in the factory checkout's origin, must be wrapperSha.
+// Returns { tag, tagSha }; throws with the reason otherwise.
+/**
+ * @param {{
+ *   packageFile: string,
+ *   headPackageFile?: string,
+ *   repository: string,
+ *   factoryDir: string,
+ *   wrapperSha: string,
+ *   git?: (dir: string, args: string[]) => string,
+ * }} options
+ */
+const verifyPin = ({
+  packageFile,
+  headPackageFile,
+  repository,
+  factoryDir,
+  wrapperSha,
+  git = runGit,
+}) => {
+  const tag = pinnedTag({ packageFile, headPackageFile, repository });
   let tagSha;
   try {
     git(factoryDir, ['fetch', '--no-tags', '--depth=1', 'origin', `+refs/tags/${tag}:refs/tags/${tag}`]);
@@ -126,14 +155,16 @@ const verifyPin = ({ packageFile, repository, factoryDir, wrapperSha, git = runG
 
 const usage = () =>
   'usage: factory-version.js verify --package <package.json> --repository <owner/name> ' +
-  '--factory-dir <dir> --wrapper-sha <sha>';
+  '--factory-dir <dir> --wrapper-sha <sha> [--head-package <package.json>]';
 
 const OPTION_KEYS = {
   '--package': 'packageFile',
   '--repository': 'repository',
   '--factory-dir': 'factoryDir',
   '--wrapper-sha': 'wrapperSha',
+  '--head-package': 'headPackageFile',
 };
+const OPTIONAL_KEYS = new Set(['headPackageFile']);
 
 /** @returns {Record<string, string> | null} */
 const parseArgs = (argv) => {
@@ -148,7 +179,9 @@ const parseArgs = (argv) => {
     if (value === undefined || value.startsWith('--')) return null;
     options[OPTION_KEYS[flag]] = value;
   }
-  const complete = Object.values(OPTION_KEYS).every((key) => options[key] !== undefined);
+  const complete = Object.values(OPTION_KEYS).every(
+    (key) => OPTIONAL_KEYS.has(key) || options[key] !== undefined,
+  );
   return complete ? options : null;
 };
 
@@ -159,8 +192,14 @@ const main = (argv = process.argv.slice(2)) => {
     return 2;
   }
   try {
-    const { packageFile, repository, factoryDir, wrapperSha } = args;
-    const { tag, tagSha } = verifyPin({ packageFile, repository, factoryDir, wrapperSha });
+    const { packageFile, headPackageFile, repository, factoryDir, wrapperSha } = args;
+    const { tag, tagSha } = verifyPin({
+      packageFile,
+      headPackageFile,
+      repository,
+      factoryDir,
+      wrapperSha,
+    });
     process.stdout.write(`factory pin: ${tag} (${tagSha})\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
