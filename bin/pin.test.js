@@ -13,6 +13,7 @@ const path = require('node:path');
 const { FIXTURE_PROFILES } = require('../test/helpers/profiles');
 const { REPO_ROOT } = require('../test/helpers/factory-package');
 const { tempDir, isolateGit, gitIn, writeFiles } = require('../test/helpers/ralph');
+const { copyTemplate, templateBuilds } = require('../test/helpers/repo-template');
 const { main, parseArgs } = require('./pin');
 
 const TAG = 'v0.1.1';
@@ -38,33 +39,25 @@ const profileOf = (fixture, mutate) => {
 };
 const posix = (target) => target.split(path.sep).join('/');
 
-/**
- * The factory repository (bare, with the tag of the new release), a project with its own origin, and
- * the operator's clone of the project whose git config sends the pin's GitHub URL to the factory.
- */
-const makeProject = (t, fixture, { files = {}, tag = 'annotated', stale = false, detachedHead = false } = {}) => {
-  isolateGit(t);
-  const scratch = tempDir(t, 'pin-');
-  const factory = path.join(scratch, 'factory.git');
-  const factoryWork = path.join(scratch, 'factory-work');
-  gitIn(scratch, 'init', '-q', '--bare', '-b', 'main', factory);
-  gitIn(scratch, 'clone', '-q', factory, factoryWork);
+/** Builds the repositories of one project with real git: the factory (bare, with the tag), the project's origin, its author clone and the operator's clone. */
+const buildProject = (dir, git, fixture, { files, tag, stale, detachedHead }) => {
+  const factory = path.join(dir, 'factory.git');
+  const factoryWork = path.join(dir, 'factory-work');
+  fs.mkdirSync(factoryWork);
+  git(factoryWork, 'init', '-q', '-b', 'main');
   writeFiles(factoryWork, { 'package.json': '{}\n' });
-  gitIn(factoryWork, 'add', '-A');
-  gitIn(factoryWork, 'commit', '-qm', 'the release');
-  gitIn(factoryWork, 'push', '-q', 'origin', 'main');
-  const tagSha = gitIn(factoryWork, 'rev-parse', 'HEAD');
-  if (tag !== 'none') {
-    if (tag === 'annotated') gitIn(factoryWork, 'tag', '-a', TAG, '-m', TAG);
-    else gitIn(factoryWork, 'tag', TAG);
-    gitIn(factoryWork, 'push', '-q', 'origin', `refs/tags/${TAG}`);
-  }
+  git(factoryWork, 'add', '-A');
+  git(factoryWork, 'commit', '-qm', 'the release');
+  if (tag === 'annotated') git(factoryWork, 'tag', '-a', TAG, '-m', TAG);
+  else if (tag !== 'none') git(factoryWork, 'tag', TAG);
+  git(dir, 'clone', '-q', '--bare', factoryWork, factory);
+  git(factory, 'remote', 'remove', 'origin');
 
-  const origin = path.join(scratch, 'origin.git');
-  const author = path.join(scratch, 'author');
-  const operator = path.join(scratch, 'operator');
-  gitIn(scratch, 'init', '-q', '--bare', '-b', 'main', origin);
-  gitIn(scratch, 'clone', '-q', origin, author);
+  const origin = path.join(dir, 'origin.git');
+  const author = path.join(dir, 'author');
+  const operator = path.join(dir, 'operator');
+  fs.mkdirSync(author);
+  git(author, 'init', '-q', '-b', 'main');
   writeFiles(author, {
     'package.json': packageText(),
     'package-lock.json': lockText(),
@@ -75,19 +68,34 @@ const makeProject = (t, fixture, { files = {}, tag = 'annotated', stale = false,
     ...(fixture === 'monorepo' ? { 'packages/api/package.json': '{}\n', 'packages/web/package.json': '{}\n' } : { 'src/index.js': '\n' }),
     ...files,
   });
-  gitIn(author, 'add', '-A');
-  gitIn(author, 'commit', '-qm', 'pinned to the first release');
-  gitIn(author, 'push', '-q', 'origin', 'main');
-  gitIn(scratch, 'clone', '-q', origin, operator);
+  git(author, 'add', '-A');
+  git(author, 'commit', '-qm', 'pinned to the first release');
+  git(dir, 'clone', '-q', '--bare', author, origin);
+  git(origin, 'remote', 'remove', 'origin');
+  git(dir, 'clone', '-q', origin, operator);
   if (stale) {
     writeFiles(author, { 'newer.txt': 'a newer commit on the default branch\n' });
-    gitIn(author, 'add', '-A');
-    gitIn(author, 'commit', '-qm', 'newer');
-    gitIn(author, 'push', '-q', 'origin', 'main');
+    git(author, 'add', '-A');
+    git(author, 'commit', '-qm', 'newer');
+    git(author, 'push', '-q', origin, 'main');
   }
-  gitIn(operator, 'config', `url.${posix(factory)}.insteadOf`, `https://github.com/${REPOSITORY}.git`);
-  if (detachedHead) gitIn(operator, 'symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
-  return { operator, tagSha, head: () => gitIn(operator, 'rev-parse', 'HEAD') };
+  git(operator, 'config', `url.${posix(factory)}.insteadOf`, `https://github.com/${REPOSITORY}.git`);
+  if (detachedHead) git(operator, 'symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
+  fs.rmSync(factoryWork, { recursive: true, force: true });
+  fs.rmSync(author, { recursive: true, force: true });
+};
+
+/**
+ * The factory repository (bare, with the tag of the new release), a project with its own origin, and
+ * the operator's clone of the project whose git config sends the pin's GitHub URL to the factory.
+ */
+const makeProject = (t, fixture, options = {}) => {
+  isolateGit(t);
+  const settings = { files: {}, tag: 'annotated', stale: false, detachedHead: false, ...options };
+  const scratch = tempDir(t, 'pin-');
+  copyTemplate('pin-project', { fixture, settings }, (dir, git) => buildProject(dir, git, fixture, settings), scratch);
+  const operator = path.join(scratch, 'operator');
+  return { operator, tagSha: gitIn(path.join(scratch, 'factory.git'), 'rev-parse', 'refs/heads/main'), head: () => gitIn(operator, 'rev-parse', 'HEAD') };
 };
 
 /**
@@ -422,4 +430,52 @@ test('takes the base branch as --base value or --base=value and never swallows a
   assert.throws(() => parseArgs(['v1.0.0', '--base', '--dry-run']), /--base needs a branch name/);
   assert.throws(() => parseArgs(['v1.0.0', '--base=']), /--base needs a branch name/);
   assert.equal(parseArgs(['v1.0.0', '--allow-older']).isOlderAllowed, true);
+});
+
+// --- fixture templates: one real-git build per distinct input, an independent copy per call ---
+
+test('copied project resolves the tag through its own factory', (t) => {
+  const first = makeProject(t, 'single-package');
+  const second = makeProject(t, 'single-package');
+  const upstream = (project) => path.dirname(project.operator);
+  assert.notEqual(upstream(first), upstream(second));
+  for (const [own, other] of [[first, second], [second, first]]) {
+    const config = gitIn(own.operator, 'config', '--list');
+    const lower = (text) => text.toLowerCase();
+    const mine = path.dirname(own.operator);
+    const theirs = path.dirname(other.operator);
+    assert.equal(path.resolve(gitIn(own.operator, 'config', 'remote.origin.url')), path.join(mine, 'origin.git'), 'origin names its own origin');
+    assert.ok(lower(config).includes(lower(posix(path.join(mine, 'factory.git')))), 'insteadOf names its own factory');
+    assert.ok(!lower(config).split(path.sep).join('/').includes(lower(posix(theirs))), 'no path of the other project');
+    const listed = gitIn(own.operator, 'ls-remote', '--tags', `https://github.com/${REPOSITORY}.git`, `refs/tags/${TAG}^{}`);
+    const sha = listed.split(/\s+/)[0];
+    assert.equal(sha, own.tagSha);
+    assert.equal(gitIn(path.join(upstream(own), 'factory.git'), 'cat-file', '-t', sha), 'commit', 'the commit is in its own factory');
+  }
+});
+
+test('repeated project inputs reuse the template', (t) => {
+  makeProject(t, 'monorepo', { files: { 'notes.txt': 'repeated\n' } });
+  const before = templateBuilds();
+  makeProject(t, 'monorepo', { files: { 'notes.txt': 'repeated\n' } });
+  assert.equal(templateBuilds(), before);
+});
+
+test('different project inputs never reuse a template', (t) => {
+  const base = { files: { 'different.txt': 'different\n' } };
+  makeProject(t, 'single-package', base);
+  const built = (changes, check) => {
+    const before = templateBuilds();
+    const project = makeProject(t, 'single-package', { ...base, ...changes });
+    assert.equal(templateBuilds(), before + 1, JSON.stringify(changes));
+    check(project);
+  };
+  const github = `https://github.com/${REPOSITORY}.git`;
+  built({ tag: 'none' }, (project) => assert.equal(gitIn(project.operator, 'ls-remote', '--tags', github), ''));
+  built({ stale: true }, (project) => {
+    gitIn(project.operator, 'fetch', '-q', 'origin');
+    assert.notEqual(gitIn(project.operator, 'rev-parse', 'HEAD'), gitIn(project.operator, 'rev-parse', 'origin/main'));
+  });
+  built({ detachedHead: true }, (project) => assert.throws(() => gitIn(project.operator, 'rev-parse', '--verify', '-q', 'refs/remotes/origin/HEAD')));
+  built({ files: { ...base.files, 'extra.txt': 'extra\n' } }, (project) => assert.equal(fs.readFileSync(path.join(project.operator, 'extra.txt'), 'utf8'), 'extra\n'));
 });
