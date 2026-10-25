@@ -4,13 +4,17 @@ Ralph executes GitHub issues of a consumer project (a repository that installed 
 
 Ralph is **off by default** (`ralph.enabled` in the profile). In this repository it stays disabled.
 
-## Status: implemented, not yet confirmed with a real Claude run
+## Status: confirmed by one controlled real Claude run
 
-The controller, its setup in the clone and the hooks of the package (the closure and skill gates and the lint and typecheck helpers, see [../hooks/README.md](../hooks/README.md)) are delivered. One stage is still open; until it is done the controller is not declared ready, and a CLI run without the configuration below stops before doing anything:
+The controller, its setup in the clone and the hooks of the package (the closure and skill gates and the lint and typecheck helpers, see [../hooks/README.md](../hooks/README.md)) are delivered. One controlled run of the pinned `claude` CLI from release `v0.1.3`, installed in a consumer, took a real issue to a pull request (#48): `implement`, `self-review`, `code-review` (the real `code-review` skill) and `final-gate` passed in the same run, and the pull request passed the consumer's CI and Acceptance Verifier. The protocol is [docs/verification/ralph-consumer-run.md](../docs/verification/ralph-consumer-run.md) in the factory repository (it is not part of the package). A CLI run without the configuration below still stops before doing anything.
 
-| Open stage | What it adds |
-|---|---|
-| Real Claude run in a consumer (#48) | a bounded run of the pinned `claude` CLI from an installed release with the real `buildClaudeArgs` flags and the `code-review` skill |
+What that one run does not cover (its section 9):
+
+- one platform: a Windows 11 host starting Ralph in WSL2 Ubuntu with Docker Desktop and a Linux engine; a native Linux host, macOS and Windows without WSL are not covered;
+- one monorepo consumer; the single-package shape is covered only by the stub tests;
+- the review fix calls (`review-fix`, `code-review-fix`) and repeated reviews, which did not run because both reviews passed at once;
+- the USD cost of a call and the exact argument vector of the container call, which the controller does not record;
+- the `unrecognized_model` warning the pinned CLI prints for the configured model (the calls succeed).
 
 There is no host fallback at any stage: without Docker nothing runs.
 
@@ -21,7 +25,7 @@ There is no host fallback at any stage: without Docker nothing runs.
 | Portable | `npm test` | Linux and Windows, no Docker, no network, no AI | the controller, the sandbox arguments and policies, with processes replaced at the `child_process` boundary |
 | Packed package | `npm test` (`test/installed-ralph.test.js`) | Linux and Windows, no Docker, no network, no AI | the real `npm pack` tarball installed in a monorepo and a single-package consumer: the installed CLI, the profile lookup and the clone's real setup, up to the controller's PR call |
 | Docker integration | `npm run prepare:ralph:sandbox`, then `npm run test:ralph:sandbox` | Linux host (WSL included) with a Linux Docker engine and BuildKit | the real containers, mounts, networks, proxy, npm, time limits and cleanup, with a stub agent |
-| Real Claude | a separate task (#48) | a consumer | the pinned CLI with the real flags and the `code-review` skill |
+| Real Claude | one controlled run, [protocol](../docs/verification/ralph-consumer-run.md) (#48) | a consumer, Windows host with WSL2 | the pinned CLI with the real flags and the `code-review` skill |
 
 ### Packed package
 

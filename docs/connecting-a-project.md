@@ -1,10 +1,10 @@
 # Connecting a project to the factory
 
-How to connect a repository to dark-factory, in the order that works. It is a procedure to follow, not a record of a finished connection: no project has been connected by following this text yet, and the package has no published release at the time of writing.
+How to connect a repository to dark-factory, in the order that works. It is a procedure to follow, not a record of one particular connection. The published releases are listed in [CHANGELOG.md](../CHANGELOG.md).
 
-- **Placeholders.** `vX.Y.Z` is the release tag you choose and `<commit-sha>` is the 40-character commit of that tag. Both must be replaced with real values from a published release; until one exists the connection cannot be completed. Do not stand in `main` or any other moving reference for them (see [Pinning rules](#pinning-rules)).
+- **Placeholders.** `vX.Y.Z` is the release tag you choose and `<commit-sha>` is the 40-character commit of that tag. Both must be replaced with real values from a published release. Do not stand in `main` or any other moving reference for them (see [Pinning rules](#pinning-rules)).
 - **Shell.** Commands are POSIX shell: Bash on Linux and macOS, Git Bash on Windows. Run them from the **git root** of your project unless a step says otherwise.
-- **Live Claude.** Everything below is checked against the code of the factory. A live run of the pinned `claude` CLI from an installed release (including the factory's hooks and Ralph) is a separate, still open confirmation (#48); this guide does not claim it.
+- **Live Claude.** Everything below is checked against the code of the factory. Ralph from an installed release was confirmed by one controlled run of the real `claude` CLI in a consumer (#48, [protocol](verification/ralph-consumer-run.md)), on one platform (a Windows host with WSL2) and one consumer shape (a monorepo); its limits are in section 9 of the protocol. The factory's hooks in a real interactive Claude Code session are not part of that protocol, and this guide does not claim them.
 
 Related guides: [upgrading.md](upgrading.md) (moving the pin, getting the release commit SHA, recovery) and [adding-a-setting.md](adding-a-setting.md) (adding a field to an existing mechanism).
 
@@ -366,7 +366,7 @@ Ralph is **off by default** (`ralph.enabled`). Skip this step to keep it off. It
 
 What stays on regardless of the profile: the controller owns every git and GitHub operation (the agent only reads git: `git status`, `git diff`, `git log`, and `git show` in the review passes), boundary checks after every turn, protected paths (`.git/`, `.claude/`, `.factory/profile.json` plus yours), and time and cost budgets. The baseline pipeline runs `implement`, `self-review`, `code-review`, `final-gate`; with `ralph.enabledSteps` absent **both reviews run**, and an explicit list is the *whole* pipeline (a review is left out only by a full list that omits it). Review fix budgets are set independently by `ralph.stepBudgets` ([adding-a-setting.md](adding-a-setting.md) shows how that field works). Project skills reach the agent through `skillRules`, `extraMetaskills` and `ruleFiles`, not through a copy of the controller.
 
-Ralph's level of verification is spelled out in [ralph/README.md](../ralph/README.md) ("Levels of verification"): portable tests, the packed package and the Docker integration with a stub agent do not show that a real Claude run works (#48), and no operating system beyond what that file states is claimed.
+Ralph's level of verification is spelled out in [ralph/README.md](../ralph/README.md) ("Levels of verification"): portable tests, the packed package and the Docker integration with a stub agent do not show that a real Claude run works. That is shown by one controlled run (#48, [protocol](verification/ralph-consumer-run.md)) on a Windows host with WSL2 in a monorepo consumer, in which neither review needed a fix; a native Linux or macOS host, the single-package shape and the review fix calls are not covered by a real run, and no operating system beyond what that file states is claimed.
 
 ### 12. Optional: Judge and overlays
 
@@ -398,7 +398,7 @@ A result of `0` does **not** prove:
 - that the tag in `package.json` resolves to the SHA in the wrappers (CI checks that; you check it with the command in [upgrading.md](upgrading.md#get-the-release-commit-sha)), nor that the lock holds that commit;
 - that the same files exist on the **default branch**, where CI reads the pin and the trusted configs;
 - anything about the eval and factory-separation wrappers, `factory-separation.json`, `VERIFIER_ENFORCE` or branch protection;
-- that a live Claude run, the hooks in a real session or Ralph work (#48 is open);
+- that a live Claude run, the hooks in a real session or Ralph work in **your** project: doctor starts none of them, and the one confirmed real run of Ralph (#48, [protocol](verification/ralph-consumer-run.md)) was in another consumer;
 - that disabled parts (Ralph, Judge) are anything but absent: they are not checked while off.
 
 Those items stay the connecting owner's to check. The connection is complete when the PR is merged to the default branch (until then CI uses the settings already on it), the checks above hold, and the first PR after the merge is verified by the pinned release.
