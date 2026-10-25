@@ -580,11 +580,9 @@ const hermeticManifest = (dir, { dependencies = {}, devDependencies = {} } = {})
 /**
  * A local release (a git repository of the package with tag v0.1.0) and a factory working copy
  * that pins it as devDependency `dark-factory`; skills/issues and agents/verify of the working copy
- * differ from the release.
+ * differ from the release. Built inside `scratch`, which the caller keeps.
  */
-const makeOwnFactory = (t, fixture) => {
-  isolateGit(t);
-  const scratch = tempDir(t, 'setup-lifecycle-');
+const buildOwnFactory = (scratch, fixture) => {
   const release = ownTree(path.join(scratch, 'release'), fixture, { git: false });
   hermeticManifest(release);
   writeFiles(release, { 'skills/issues/SKILL.md': RELEASE_ISSUES, 'agents/verify.md': RELEASE_VERIFY });
@@ -602,7 +600,54 @@ const makeOwnFactory = (t, fixture) => {
   gitIn(factory, 'init', '-q', '-b', 'main');
   gitIn(factory, 'add', '-A');
   gitIn(factory, 'commit', '-qm', 'working copy');
-  return { factory, installed: path.join(factory, 'node_modules', 'dark-factory') };
+  return factory;
+};
+
+/** Every call that went through `runNpm` in this process, for the tests that count installs. */
+const npmLog = [];
+const npm = (cwd, args) => {
+  npmLog.push({ cwd, args });
+  return runNpm(cwd, args);
+};
+
+// One real `npm install` per fixture profile and test process, made lazily by the first scenario that
+// needs it. The release repository stays where it was built: the lock of the installed tree names it.
+/** @type {string | null} */
+let sharedRoot = null;
+after(() => sharedRoot && fs.rmSync(sharedRoot, { recursive: true, force: true }));
+/** @type {Map<string, { factory: string, output: string }>} */
+const sharedInstalls = new Map();
+
+const sharedInstall = (fixture) => {
+  const known = sharedInstalls.get(fixture);
+  if (known) return known;
+  sharedRoot ??= fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'setup-shared-install-')));
+  const scratch = fs.mkdtempSync(path.join(sharedRoot, `${fixture}-`));
+  try {
+    const factory = buildOwnFactory(scratch, fixture);
+    const install = npm(factory, ['install']);
+    assert.equal(install.status, 0, install.output);
+    const created = { factory, output: install.output };
+    sharedInstalls.set(fixture, created);
+    return created;
+  } catch (error) {
+    fs.rmSync(scratch, { recursive: true, force: true });
+    throw error;
+  }
+};
+
+/**
+ * An independent copy of the shared install for one scenario: the whole factory tree with its
+ * `node_modules`. Links stay links (`metaskills` is a `file:` dependency, a junction on Windows).
+ * `installOutput` is the output of the install, naming the copy instead of the shared tree.
+ */
+const makeOwnFactory = (t, fixture) => {
+  isolateGit(t);
+  const shared = sharedInstall(fixture);
+  // The lock names the `file:` dependency by a path relative to the tree, so a copy sits at the depth of the shared tree.
+  const factory = path.join(tempDir(t, 'setup-lifecycle-'), 'copy', 'factory');
+  fs.cpSync(shared.factory, factory, { recursive: true, verbatimSymlinks: true });
+  return { factory, installed: path.join(factory, 'node_modules', 'dark-factory'), installOutput: shared.output.replaceAll(shared.factory, factory) };
 };
 
 /** The copies are the release's, laid out by the installed package; the root postinstall changed nothing. */
@@ -622,26 +667,22 @@ const assertReleaseCopies = ({ factory, installed }, output) => {
 
 scenarioTest('npm install in factory does not take copies from working copy', (t, fixture) => {
   const own = makeOwnFactory(t, fixture);
-  const install = runNpm(own.factory, ['install']);
-  assert.equal(install.status, 0, install.output);
-  assertReleaseCopies(own, install.output);
+  assertReleaseCopies(own, own.installOutput);
   assert.equal(JSON.parse(fs.readFileSync(path.join(own.factory, 'package-lock.json'), 'utf8')).packages['node_modules/dark-factory'].dev, true);
 
   for (const destination of baseDestinations()) fs.rmSync(path.join(own.factory, destination), { recursive: true });
   fs.rmSync(path.join(own.factory, MANIFEST));
-  const ci = runNpm(own.factory, ['ci']);
+  const ci = npm(own.factory, ['ci']);
   assert.equal(ci.status, 0, ci.output);
   assertReleaseCopies(own, ci.output);
 });
 
 scenarioTest('failed release setup never falls back to working sources', (t, fixture) => {
   const own = makeOwnFactory(t, fixture);
-  const install = runNpm(own.factory, ['install']);
-  assert.equal(install.status, 0, install.output);
   writeFiles(own.factory, { '.factory/profile.json': profileOf(fixture, (p) => (p.unknownField = true)) });
   const before = snapshot(path.join(own.factory, '.claude'));
 
-  const ci = runNpm(own.factory, ['ci']);
+  const ci = npm(own.factory, ['ci']);
   assert.notEqual(ci.status, 0, ci.output);
   assert.ok(ci.output.includes('dark-factory-setup: '), ci.output);
   assert.ok(ci.output.includes('unknownField: unknown field'), 'the release setup itself refused');
@@ -652,3 +693,27 @@ scenarioTest('failed release setup never falls back to working sources', (t, fix
   assert.ok(!fs.existsSync(path.join(own.factory, BOOTSTRAP_MARKER)));
 });
 
+
+scenarioTest('shared npm install serves independent copies', (t, fixture) => {
+  const first = makeOwnFactory(t, fixture);
+  const second = makeOwnFactory(t, fixture);
+  const installs = npmLog.filter(({ cwd, args }) => args[0] === 'install' && cwd.startsWith(path.dirname(sharedInstall(fixture).factory)));
+  assert.equal(installs.length, 1, 'npm install ran once for the profile');
+  assert.equal(npmLog.filter(({ cwd, args }) => args[0] === 'install' && cwd === first.factory).length, 0);
+  assert.notEqual(first.factory, second.factory);
+  for (const copy of [first, second]) {
+    assert.equal(fs.readFileSync(path.join(copy.installed, 'skills/issues/SKILL.md'), 'utf8'), RELEASE_ISSUES, 'the dependency is the release');
+    assert.ok(fs.existsSync(path.join(copy.installed, 'bin/setup.js')));
+  }
+  assert.notEqual(first.installed, second.installed);
+});
+
+scenarioTest('a changed install copy never reaches the next copy', (t, fixture) => {
+  const profile = path.join('.factory', 'profile.json');
+  const first = makeOwnFactory(t, fixture);
+  writeFiles(first.factory, { [profile]: profileOf(fixture, (p) => (p.unknownField = true)) });
+  fs.rmSync(path.join(first.factory, 'node_modules', 'dark-factory', 'skills'), { recursive: true });
+  const next = makeOwnFactory(t, fixture);
+  assert.equal(fs.readFileSync(path.join(next.factory, profile), 'utf8'), profileOf(fixture));
+  assert.ok(fs.existsSync(path.join(next.installed, 'skills')), 'the installed release is whole in the next copy');
+});

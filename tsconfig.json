@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["*.js", ".claude/**/*.js", "bin/**/*.js", "doctor/**/*.js", "skills/**/*.js", "agents/**/*.js", "hooks/**/*.js", "profile/**/*.js", "verifier/**/*.js", "judge/**/*.js", "ralph/**/*.js", "test/integration/**/*.js", "test/fixtures/ralph-sandbox/**/*.js", "test/installed-ralph.test.js", "test/fixtures/installed-ralph/**/*.js"],
+  "include": ["*.js", ".claude/**/*.js", "bin/**/*.js", "doctor/**/*.js", "skills/**/*.js", "agents/**/*.js", "hooks/**/*.js", "profile/**/*.js", "verifier/**/*.js", "judge/**/*.js", "ralph/**/*.js", "test/integration/**/*.js", "test/fixtures/ralph-sandbox/**/*.js", "test/installed-ralph.test.js", "test/helpers/repo-template.js", "test/fixture-cache.test.js", "test/fixtures/installed-ralph/**/*.js"],
   "exclude": ["node_modules"]
 }

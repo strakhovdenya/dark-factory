@@ -17,6 +17,7 @@ const { profileCopy } = require('./profiles');
 const sandbox = require('../../ralph/sandbox');
 const { gitignoreText, installFactoryPackage, runSetupScript } = require('./factory-package');
 const { freezeSnapshot } = require('../../ralph/trusted-profile');
+const { copyTemplate } = require('./repo-template');
 
 // The controller logs progress with console.log (multi-byte text). In a test file this output shares
 // the pipe with the test runner's own serialized events, and on Linux CI it intermittently broke the
@@ -85,17 +86,18 @@ const profileText = (profile) => (typeof profile === 'string' ? profile : JSON.s
 /** @type {(...args: any[]) => any} */
 const makeConsumer = (t, { files = {}, defaultBranch = 'trunk', profile } = {}) => {
   const scratch = tempDir(t, 'ralph-consumer-');
-  const seed = path.join(scratch, 'seed');
-  fs.mkdirSync(seed);
-  gitIn(seed, 'init', '-q', '-b', defaultBranch);
-  writeFiles(seed, { '.gitignore': IGNORED, 'README.md': 'neutral\n', ...(profile === undefined ? {} : { '.factory/profile.json': profileText(profile) }), ...files });
-  gitIn(seed, 'add', '-A');
-  gitIn(seed, 'commit', '-qm', 'init');
-  const origin = path.join(scratch, 'origin.git');
-  gitIn(scratch, 'clone', '-q', '--bare', seed, origin);
-  const consumerRoot = path.join(scratch, 'consumer');
-  gitIn(scratch, 'clone', '-q', origin, consumerRoot);
-  return { origin, consumerRoot, scratch };
+  const build = (dir, git) => {
+    const seed = path.join(dir, 'seed');
+    fs.mkdirSync(seed);
+    git(seed, 'init', '-q', '-b', defaultBranch);
+    writeFiles(seed, { '.gitignore': IGNORED, 'README.md': 'neutral\n', ...(profile === undefined ? {} : { '.factory/profile.json': profileText(profile) }), ...files });
+    git(seed, 'add', '-A');
+    git(seed, 'commit', '-qm', 'init');
+    git(dir, 'clone', '-q', '--bare', seed, path.join(dir, 'origin.git'));
+    git(dir, 'clone', '-q', path.join(dir, 'origin.git'), path.join(dir, 'consumer'));
+  };
+  copyTemplate('consumer', { files, defaultBranch, profile: profile === undefined ? null : profileText(profile) }, build, scratch);
+  return { origin: path.join(scratch, 'origin.git'), consumerRoot: path.join(scratch, 'consumer'), scratch };
 };
 
 /** Pushes a branch of `origin` (from its default branch) whose files are `files`; for stacked-base scenarios. */
