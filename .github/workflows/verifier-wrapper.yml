@@ -37,9 +37,9 @@ jobs:
       pull-requests: write
       checks: read
       statuses: write
-    uses: strakhovdenya/dark-factory/.github/workflows/acceptance-verifier.yml@7e9150b7c6c18388814f46a9a827b0db450abaa8
+    uses: strakhovdenya/dark-factory/.github/workflows/acceptance-verifier.yml@9799b65bd231e06d5d1066065363215a467d9f4f
     with:
-      factory-sha: 7e9150b7c6c18388814f46a9a827b0db450abaa8
+      factory-sha: 9799b65bd231e06d5d1066065363215a467d9f4f
       model: ${{ vars.VERIFIER_MODEL }}
       enforce: true
     secrets:
