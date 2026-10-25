@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation status of Ralph after the controlled real run (#90): `README.md` opens with an overview for a non-technical reader (what the factory is, the issue → Ralph → PR → Acceptance Verifier → verdict flow, the result of the run of #48 with a link to `docs/verification/ralph-consumer-run.md`, the key engineering decisions), followed by a technical reference with new sections on the components, the profile, Ralph, the Acceptance Verifier and the limits of that run. `ralph/README.md` reports Ralph as confirmed by one controlled run with the limits of the protocol instead of an open stage, and `docs/connecting-a-project.md` no longer calls #48 open or the package unreleased. No behavior changed.
+
 ## [0.1.3] - 2026-10-25
 
 Fourth release. It fixes the pin check of the reusable workflow `factory-separation.yml` on upgrade pull requests. The rest of the package is unchanged since `v0.1.2`.
