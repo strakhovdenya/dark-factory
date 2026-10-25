@@ -75,14 +75,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       # The two pins must name one commit; see the `Check factory pin` step of
-      # acceptance-verifier.yml. A mismatch fails the check.
+      # acceptance-verifier.yml. A mismatch fails the check. The default-branch
+      # package.json is the anchor; a PR head that moves the tag (an upgrade PR)
+      # is checked by its own tag against its own wrapper SHA.
       - name: Check factory pin
         env:
           FACTORY_SHA: ${{ inputs.factory-sha }}
         run: |
           set -euo pipefail
           if ! RESULT=$(node factory/verifier/factory-version.js verify --package trusted/package.json \
-            --repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA" 2>&1); then
+            --repository "$FACTORY_REPOSITORY" --factory-dir factory --wrapper-sha "$FACTORY_SHA" \
+            --head-package package.json 2>&1); then
             echo "::error::$RESULT"
             echo "- $RESULT" >> "$GITHUB_STEP_SUMMARY"
             exit 1
