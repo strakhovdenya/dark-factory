@@ -5,6 +5,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-25
+
+Fourth release. It fixes the pin check of the reusable workflow `factory-separation.yml` on upgrade pull requests. The rest of the package is unchanged since `v0.1.2`.
+
+### Fixed
+
+- `Factory separation` no longer fails on every pull request that moves the factory pin (#81). `verifier/factory-version.js verify` takes an optional `--head-package <package.json>`: the default-branch `package.json` stays the trust anchor and must hold a valid release tag; when the head moves the tag, the head's tag must resolve to the SHA of the head's wrapper, and when it does not, the anchor tag must. A PR that changes only the wrapper SHA, or only the tag, still fails with `factory pin mismatch`. The lock file is not compared. `docs/upgrading.md` describes the behavior. The verifier, spec-approval and Judge workflows run from the default branch and are not affected.
+
+### Changed
+
+- Tests: git fixture templates are cached and `setup.test.js` shares one `npm install`, which shortens `npm test` on Windows (#82). No package behavior changes.
+
 ## [0.1.2] - 2026-10-25
 
 Third release. It adds the package command `dark-factory-ralph-wsl` and the optional `wsl` section of `.ralph/config.json`. The rest of the package is unchanged since `v0.1.1`.
