@@ -644,7 +644,8 @@ const sharedInstall = (fixture) => {
 const makeOwnFactory = (t, fixture) => {
   isolateGit(t);
   const shared = sharedInstall(fixture);
-  const factory = path.join(tempDir(t, 'setup-lifecycle-'), 'factory');
+  // The lock names the `file:` dependency by a path relative to the tree, so a copy sits at the depth of the shared tree.
+  const factory = path.join(tempDir(t, 'setup-lifecycle-'), 'copy', 'factory');
   fs.cpSync(shared.factory, factory, { recursive: true, verbatimSymlinks: true });
   return { factory, installed: path.join(factory, 'node_modules', 'dark-factory'), installOutput: shared.output.replaceAll(shared.factory, factory) };
 };
