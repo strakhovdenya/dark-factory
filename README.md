@@ -4,6 +4,16 @@
 
 **dark-factory is a reusable "software factory" for AI-assisted development.** An AI agent takes a written task (a GitHub issue), implements it in an isolated sandbox and opens a pull request; an independent verifier then checks that pull request against the task. The factory is one package that any repository can install at a fixed version, so every project gets the same rules and the same checks.
 
+### Watch the engineering walkthrough
+
+[![Dark Factory — a 4:20 engineering walkthrough of the issue-to-verified-PR workflow, featuring Ralph, Docker and an independent CI verifier](docs/media/dark-factory-overview.svg)](https://github.com/strakhovdenya/dark-factory/releases/download/v0.1.3/DarkFactoryFullFilmV1_final.mp4)
+
+**[Watch the full film (4:20 · English narration and subtitles)](https://github.com/strakhovdenya/dark-factory/releases/download/v0.1.3/DarkFactoryFullFilmV1_final.mp4)** · **[Read the real-run evidence](docs/verification/ralph-consumer-run.md)**
+
+The film walks through Claude Code development controls, Ralph's Docker-isolated issue-to-PR workflow, and independent CI acceptance verification. The verifier **FAIL** example is illustrative, not a recorded incident; the later **PASS** depicts a separate, [documented controlled consumer run](docs/verification/ralph-consumer-run.md) (JobFlow [issue #677](https://github.com/strakhovdenya/jobflow-cv-pipeline/issues/677) → [PR #678](https://github.com/strakhovdenya/jobflow-cv-pipeline/pull/678), left unmerged). This evidence covers one controlled run, not general production operation.
+
+
+
 **The problem it solves.** An AI coding agent is fast, but on its own it is hard to trust: it may touch files it should not, skip tests, quietly weaken a check, or claim a task is done when it is not. dark-factory puts the agent inside a process with hard boundaries and makes the final decision about a pull request by code, not by the model's opinion.
 
 **How a task flows.**
