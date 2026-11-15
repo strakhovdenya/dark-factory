@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Dark Factory engineering walkthrough</title>
+  <desc id="desc">Dark Factory overview: GitHub issue to Ralph sandbox to pull request to independent CI acceptance verifier. Click the image in README to watch the film.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#090f15"/>
+      <stop offset=".55" stop-color="#0c141b"/>
+      <stop offset="1" stop-color="#081219"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" x2="1">
+      <stop stop-color="#4dd4c9" stop-opacity=".16"/>
+      <stop offset=".5" stop-color="#4dd4c9" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#4dd4c9" stop-opacity=".16"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#2dc6ba" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#2dc6ba" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <circle cx="632" cy="240" r="540" fill="url(#glow)"/>
+  <g stroke="#9ddcd5" stroke-opacity=".06" stroke-width="1">
+    <path d="M0 112H1280M0 225H1280M0 338H1280M0 451H1280M0 564H1280"/>
+    <path d="M144 0V720M342 0V720M540 0V720M738 0V720M936 0V720M1134 0V720"/>
+  </g>
+  <g transform="translate(607 90)" stroke="#42d3c5" stroke-width="3" fill="none" stroke-linejoin="round">
+    <rect x="-42" y="-42" width="84" height="84" rx="17" stroke-opacity=".65"/>
+    <path d="M0-24 21-12 21 13 0 25-21 13-21-12Z"/>
+    <path d="M-21-12 0 0 21-12M0 0V25"/>
+  </g>
+  <text x="640" y="232" fill="#f3f6fa" font-family="Arial, Helvetica, sans-serif" font-size="78" font-weight="800" letter-spacing="11" text-anchor="middle">DARK FACTORY</text>
+  <text x="640" y="284" fill="#aabdc8" font-family="Arial, Helvetica, sans-serif" font-size="29" text-anchor="middle">Reusable workflows for controlled AI-assisted development</text>
+  <path d="M150 330 H1130" stroke="url(#line)" stroke-width="2"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="20" text-anchor="middle">
+    <rect x="107" y="378" width="202" height="84" rx="14" fill="#111e27" stroke="#42636a" stroke-width="2"/>
+    <text x="208" y="429" fill="#e4f2f3">GITHUB ISSUE</text>
+    <path d="M320 421H357" stroke="#42c8ba" stroke-width="3" stroke-linecap="round"/>
+    <path d="m348 413 9 8-9 8" fill="none" stroke="#42c8ba" stroke-width="3"/>
+    <rect x="367" y="378" width="215" height="84" rx="14" fill="#11262a" stroke="#43b8ac" stroke-width="2"/>
+    <text x="474" y="414" fill="#edf8f7">RALPH</text>
+    <text x="474" y="443" fill="#85aea9" font-size="16" font-weight="400">Docker sandbox</text>
+    <path d="M593 421H630" stroke="#42c8ba" stroke-width="3" stroke-linecap="round"/>
+    <path d="m621 413 9 8-9 8" fill="none" stroke="#42c8ba" stroke-width="3"/>
+    <rect x="640" y="378" width="216" height="84" rx="14" fill="#111e27" stroke="#42636a" stroke-width="2"/>
+    <text x="748" y="429" fill="#e4f2f3">PULL REQUEST</text>
+    <path d="M867 421H904" stroke="#42c8ba" stroke-width="3" stroke-linecap="round"/>
+    <path d="m895 413 9 8-9 8" fill="none" stroke="#42c8ba" stroke-width="3"/>
+    <rect x="914" y="378" width="259" height="84" rx="14" fill="#11262a" stroke="#43b8ac" stroke-width="2"/>
+    <text x="1043" y="414" fill="#edf8f7">CI VERIFIER</text>
+    <text x="1043" y="443" fill="#85aea9" font-size="16" font-weight="400">Code-computed verdict</text>
+  </g>
+  <g transform="translate(640 560)">
+    <rect x="-293" y="-44" width="586" height="88" rx="44" fill="#34c5b8" fill-opacity=".13" stroke="#4ad9cb" stroke-width="2"/>
+    <circle cx="-219" cy="0" r="25" fill="#49d8c8"/>
+    <path d="m-227-14 20 14-20 14Z" fill="#071319"/>
+    <text x="39" y="9" text-anchor="middle" fill="#e4faf6" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="700" letter-spacing="1">WATCH THE 4:20 FILM</text>
+  </g>
+  <text x="640" y="675" text-anchor="middle" fill="#8296a3" font-family="Arial, Helvetica, sans-serif" font-size="22">Designed and engineered by Denys Strakhov</text>
+</svg>
